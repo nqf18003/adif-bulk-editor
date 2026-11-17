@@ -1,0 +1,970 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADIF一括編集ツール</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #667085;
+    --line: #d0d5dd; --accent: #1f6feb; --accent-text: #ffffff;
+    --warn: #b54708; --warn-bg: #fffaeb; --danger: #c0362c;
+    --cell-bg: #ffffff; --cell-alt: #f8f9fb; --head-bg: #eef1f5; --drop: #e8f0fe; --sel-bg: #a9c8ff; --sel-text: #0b2a66;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181e; --panel: #1e222a; --text: #e6e8ec; --muted: #98a2b3;
+      --line: #3a404c; --accent: #4b8df8; --accent-text: #0b0d10;
+      --warn: #fdb022; --warn-bg: #2c2410; --danger: #f97066;
+      --cell-bg: #1e222a; --cell-alt: #232832; --head-bg: #272c36; --drop: #1d2a40; --sel-bg: #2b5bb5; --sel-text: #ffffff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; font-size: 14px; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0 12px 0 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin: 0 16px 12px; padding: 12px 16px; }
+  button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  #fileName { color: var(--muted); word-break: break-all; }
+  .grid { display: grid; grid-template-columns: max-content 1fr max-content 1fr; gap: 8px 12px; align-items: center; }
+  .grid label { white-space: nowrap; }
+  .field { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .field input { flex: 1; min-width: 0; }
+  input[type=text] { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px;
+    background: var(--cell-bg); color: var(--text); }
+  input[type=text]::placeholder { color: var(--muted); opacity: .6; }
+  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .note { color: var(--warn); font-size: 12px; white-space: nowrap; }
+  .hint { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .qslrow { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .qslrow input { flex: 1; }
+  .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  #pending { color: var(--warn); background: var(--warn-bg); border-radius: 5px; padding: 3px 8px; font-size: 12px; }
+  .tablewrap { overflow: auto; max-height: calc(100vh - 430px); min-height: 160px; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; font-size: 13px; }
+  th, td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 0; white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--head-bg); padding: 5px 8px; text-align: left; z-index: 1; font-weight: 600; }
+  td.num { padding: 0 8px; color: var(--muted); text-align: right; background: var(--head-bg); }
+  tr:nth-child(even) td { background: var(--cell-alt); }
+  td input { border: 0; background: transparent; color: var(--text); font: inherit; padding: 4px 6px; width: 100%; min-width: 60px; }
+  td input:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--cell-bg); }
+  td.del { text-align: center; }
+  /* 選んだセル: 濃い青の背景＋太い枠＋太字。行番号と列名も色を変える（Excel 風） */
+  #tableWrap td.sel { background: var(--sel-bg); }
+  #tableWrap td.sel input { box-shadow: inset 0 0 0 2px var(--accent); font-weight: 700; color: var(--sel-text); }
+  #tableWrap th.selhead, #tableWrap td.num.selhead { background: var(--accent); color: var(--accent-text); }
+  #selInfo.on { background: var(--accent); color: var(--accent-text); border-radius: 5px; padding: 3px 10px; font-weight: 600; }
+  #tableWrap.dragging, #tableWrap.dragging input { user-select: none; cursor: cell; }
+  th.colhead, td.num { cursor: pointer; user-select: none; }
+  .fillbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .fillbar .hint { white-space: normal; }
+  #fillText { width: 200px; }
+  td.del button { border: 0; background: transparent; color: var(--danger); padding: 2px 8px; }
+  footer { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  #outList { color: var(--muted); font-size: 12px; margin: 6px 0 0; padding-left: 18px; }
+  #drop { position: fixed; inset: 0; background: var(--drop); opacity: .9; display: none;
+    align-items: center; justify-content: center; font-size: 22px; z-index: 10; border: 4px dashed var(--accent); }
+  body.dragging #drop { display: flex; }
+  #empty { color: var(--muted); padding: 24px; text-align: center; }
+  dialog { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); max-width: min(720px, 92vw); padding: 18px 20px; }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  dialog h2 { font-size: 16px; margin: 0 0 10px; }
+  dialog ul { margin: 6px 0; padding-left: 20px; max-height: 50vh; overflow: auto; }
+  dialog li { margin: 2px 0; word-break: break-all; }
+  dialog .btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  @media (max-width: 760px) {
+    .grid { grid-template-columns: max-content 1fr; }
+    .panel { margin: 0 8px 10px; padding: 10px; }
+  }
+</style>
+</head>
+<body>
+<div id="drop">ここにADIFファイルを放してください</div>
+
+<header>
+  <h1>ADIF一括編集ツール</h1>
+  <button id="openBtn" class="primary">ADIFを開く</button>
+  <input type="file" id="fileInput" accept=".adi,.adif,.txt" hidden>
+  <span id="fileName">ファイルを選ぶか、この画面にドラッグ＆ドロップしてください</span>
+</header>
+
+<section class="panel" id="commonPanel">
+  <div class="grid">
+    <label for="c_station">Station Callsign</label>
+    <div class="field"><input type="text" id="c_station" data-upper placeholder="例: JA1ABC/1"><span class="note" data-note="STATION_CALLSIGN"></span></div>
+    <label for="c_grid">My Grid</label>
+    <div class="field"><input type="text" id="c_grid" placeholder="例: PM95ur"><span class="note" data-note="MY_GRIDSQUARE"></span></div>
+
+    <label for="c_sota">My SOTA Ref</label>
+    <div class="field"><input type="text" id="c_sota" data-upper placeholder="例: JA/TK-001"><span class="note" data-note="MY_SOTA_REF"></span></div>
+    <label for="c_sig">My SIG</label>
+    <div class="field"><input type="text" id="c_sig" data-upper placeholder="例: POTA"><span class="note" data-note="MY_SIG"></span></div>
+
+    <label for="c_park1">POTA公園1</label>
+    <div class="field"><input type="text" id="c_park1" data-upper placeholder="例: JP-0001"><span class="note" data-note="MY_SIG_INFO"></span></div>
+    <label for="c_jcc">JCC/JCG</label>
+    <div class="field"><input type="text" id="c_jcc" data-upper placeholder="例: JCC1001 または 1001"><span class="hint" id="jccHint"></span></div>
+
+    <label for="c_park2">POTA公園2</label>
+    <div class="field"><input type="text" id="c_park2" data-upper placeholder="例: JP-0002"><span class="hint">（2ferのとき）</span></div>
+    <span></span><span></span>
+
+    <label for="c_park3">POTA公園3</label>
+    <div class="field"><input type="text" id="c_park3" data-upper placeholder="例: JP-0003"><span class="hint">（3ferのとき）</span></div>
+    <span></span><span></span>
+  </div>
+  <div class="qslrow">
+    <label for="c_qsl">QSL MSG</label>
+    <input type="text" id="c_qsl" placeholder="例: TNX QSO SOTA JA/TK-001 POTA JP-0001 JCC1001（自動で作られます）">
+    <span class="note" data-note="QSLMSG"></span>
+  </div>
+  <div class="actions">
+    <span id="pending" hidden>共通項目に、まだ表へ反映していない変更があります</span>
+    <button id="autoBtn">自動に戻す</button>
+    <button id="applyBtn" class="primary" disabled>全QSOに反映</button>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="fillbar">
+    <span id="selInfo">セルを選んでください</span>
+    <button id="clearSelBtn" disabled>選択を解除</button>
+    <span class="hint">ドラッグ・Shift+クリックで範囲、Ctrl+クリックで1つずつ追加、列名・行番号のクリックで列・行ごと。
+      複数のセルを選んで<b>右クリック</b>すると、同じ文字をまとめて入れられます</span>
+  </div>
+  <div class="tablewrap" id="tableWrap"><div id="empty">ADIFファイルを開くと、ここにQSOの一覧が出ます</div></div>
+  <div class="actions" style="justify-content:flex-start">
+    <button id="addRowBtn" disabled>＋ 行を追加</button>
+  </div>
+</section>
+
+<section class="panel">
+  <footer>
+    <span>QSO数: <b id="qsoCount">0</b></span>
+    <span>出力予定: <b id="fileCount">0</b>ファイル</span>
+    <span style="flex:1"></span>
+    <button id="saveBtn" class="primary" disabled>ADIFを保存</button>
+  </footer>
+  <ul id="outList"></ul>
+</section>
+
+<dialog id="dlg">
+  <h2 id="dlgTitle"></h2>
+  <div id="dlgBody"></div>
+  <div class="btns" id="dlgBtns"></div>
+</dialog>
+
+<script>
+'use strict';
+// ===================== 定数 =====================
+const TOOL_NAME = 'ADIF Bulk Editor';
+const PROGRAM_ID = 'ADIFBulkEditor';
+const PROGRAM_VERSION = '1.0.0';
+const NL = '\r\n';
+// 出力・表の並び順（仕様 6.3）
+const ORDER = ['CALL', 'STATION_CALLSIGN', 'BAND', 'MODE', 'FREQ', 'MY_GRIDSQUARE', 'MY_SOTA_REF', 'MY_SIG',
+  'MY_SIG_INFO', 'QSO_DATE', 'TIME_ON', 'RST_RCVD', 'RST_SENT', 'SOTA_REF', 'SIG', 'SIG_INFO', 'GRIDSQUARE', 'QSLMSG'];
+// 表の並び順（出力とは別。MY_GRIDSQUARE を MY_SIG_INFO の後ろに。SIG・SIG_INFO は P2P 用）
+const TABLE_ORDER = ['CALL', 'STATION_CALLSIGN', 'BAND', 'MODE', 'FREQ', 'MY_SOTA_REF', 'MY_SIG', 'MY_SIG_INFO',
+  'MY_GRIDSQUARE', 'QSO_DATE', 'TIME_ON', 'RST_RCVD', 'RST_SENT', 'SOTA_REF', 'SIG', 'SIG_INFO', 'GRIDSQUARE', 'QSLMSG'];
+
+// ===================== 状態 =====================
+const state = {
+  fileName: '',
+  records: [],      // 1QSO = Map(フィールド名 -> 値)。Map は元の順を覚えている
+  extraCols: [],    // ORDER 以外のフィールド（出てきた順）
+  qslManual: false, // QSLMSG を手で直したか
+  pending: false,   // 共通項目に未反映の変更があるか
+  dirty: false,     // 保存していない変更があるか
+};
+
+// ===================== ADIF 読み取り（仕様 7） =====================
+// バイト単位で読む（長さはバイト数のため。全角が入っても壊れない）
+function parseAdif(bytes) {
+  const dec = new TextDecoder('utf-8');
+  const n = bytes.length;
+  let pos = 0;
+  // ヘッダー: 先頭が '<' でなければヘッダーあり → <EOH> まで読み飛ばす
+  let first = 0;
+  while (first < n && (bytes[first] === 0x20 || bytes[first] === 0x09 || bytes[first] === 0x0d || bytes[first] === 0x0a || bytes[first] === 0xef || bytes[first] === 0xbb || bytes[first] === 0xbf)) first++;
+  const hasHeader = first < n && bytes[first] !== 0x3c;
+  const records = [];
+  let cur = new Map();
+  let inHeader = hasHeader;
+  while (pos < n) {
+    // 次の '<' を探す
+    while (pos < n && bytes[pos] !== 0x3c) pos++;
+    if (pos >= n) break;
+    let end = pos + 1;
+    while (end < n && bytes[end] !== 0x3e) end++;
+    if (end >= n) break;
+    const tag = dec.decode(bytes.subarray(pos + 1, end));
+    pos = end + 1;
+    const parts = tag.split(':');
+    const name = parts[0].trim().toUpperCase();
+    if (name === 'EOH') { inHeader = false; cur = new Map(); continue; }
+    if (name === 'EOR') {
+      if (!inHeader && cur.size) records.push(cur);
+      cur = new Map();
+      continue;
+    }
+    if (parts.length < 2) continue;
+    const len = parseInt(parts[1], 10);
+    if (!(len >= 0)) continue;
+    const value = dec.decode(bytes.subarray(pos, Math.min(n, pos + len)));
+    pos += len;
+    if (inHeader || !name) continue;
+    cur.set(name, value);
+  }
+  return records;
+}
+
+// ファイルを開いた時点の自動変換（仕様 4）
+function autoConvert(rec) {
+  const out = new Map();
+  for (const [k, v] of rec) {
+    if (k === 'QSO_DATE_OFF') continue;
+    if (k === 'OPERATOR') {
+      if (!rec.has('STATION_CALLSIGN')) out.set('STATION_CALLSIGN', v);
+      continue;
+    }
+    // 公園がカンマでつながっていたら（移動運用ログの 2fer・3fer）、1つ目の公園にそろえる。全部の公園は開くときに公園1〜3の欄へ入れる（仕様 11）
+    if (k === 'MY_SIG_INFO' && v.includes(',')) {
+      out.set(k, v.split(',').map(s => s.trim()).filter(Boolean)[0] || '');
+      continue;
+    }
+    out.set(k, v);
+  }
+  return out;
+}
+
+// ファイル名から JCC/JCG を読む（例: ...-jcc-1001.adi → JCC1001）
+function jccFromFileName(name) {
+  const base = name.replace(/\.[^.]*$/, '');
+  const m = base.match(/(?:^|[^a-z0-9])(jc[cg])[-_ ]?([0-9][0-9a-z]*)(?=[^a-z0-9]|$)/i);
+  return m ? (m[1] + m[2]).toUpperCase() : '';
+}
+
+// ===================== ADIF 書き出し（仕様 6） =====================
+const enc = new TextEncoder();
+function byteLen(s) { return enc.encode(s).length; }
+function pad2(x) { return String(x).padStart(2, '0'); }
+
+function recordLine(rec) {
+  const items = [];
+  const put = (k) => { const v = rec.get(k); if (v !== undefined && v !== '') items.push('<' + k + ':' + byteLen(v) + '>' + v); };
+  for (const k of ORDER) put(k);
+  for (const k of rec.keys()) if (!ORDER.includes(k)) put(k);
+  return items.join(' ') + ' <EOR>';
+}
+
+function buildAdif(records) {
+  const d = new Date();
+  // ADIF Master と同じ書き方（例: 08 Nov, 2026 at 14:26）
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const stamp = pad2(d.getDate()) + ' ' + MON[d.getMonth()] + ', ' + d.getFullYear() + ' at ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  const head = [
+    'File generated on ' + stamp + ' by ' + TOOL_NAME,
+    '<ADIF_VER:5>3.1.4',
+    '<PROGRAMID:' + byteLen(PROGRAM_ID) + '>' + PROGRAM_ID,
+    '<PROGRAMVERSION:' + byteLen(PROGRAM_VERSION) + '>' + PROGRAM_VERSION,
+    '<EOH>',
+  ];
+  return head.join(NL) + NL + NL + records.map(recordLine).join(NL) + NL;
+}
+
+// ===================== ファイルの分け方（仕様 5） =====================
+function safeName(s) { return s.replace(/\//g, '-').replace(/[\\:*?"<>|\s]/g, '-'); }
+
+function makeFileName(date, sota, park, jcc, isSub) {
+  const parts = [];
+  if (date) parts.push(date);
+  if (sota) parts.push('SOTA', safeName(sota));
+  if (park) parts.push('POTA', safeName(park));
+  if (jcc) parts.push(safeName(jcc));
+  return (isSub ? 'sub' : '') + (parts.join('-') || 'output') + '.adi';
+}
+
+function planOutputs() {
+  const c = readCommon();
+  const subParks = c.parks.slice(1);
+  // UTC 日付ごとに分ける（元の順を保つ）
+  const groups = new Map();
+  for (const rec of state.records) {
+    const date = (rec.get('QSO_DATE') || '').trim();
+    if (!groups.has(date)) groups.set(date, []);
+    groups.get(date).push(rec);
+  }
+  const outs = [];
+  for (const [date, recs] of groups) {
+    const sota = (recs[0].get('MY_SOTA_REF') || '').trim();
+    const park1 = (recs[0].get('MY_SIG_INFO') || '').trim();
+    outs.push({ name: makeFileName(date, sota, park1, c.jcc, false), records: recs });
+    for (const p of subParks) {
+      const subRecs = recs.map(r => {
+        const m = new Map(r);
+        m.delete('MY_SOTA_REF');
+        m.set('MY_SIG_INFO', p);
+        return m;
+      });
+      outs.push({ name: makeFileName(date, sota, p, c.jcc, true), records: subRecs });
+    }
+  }
+  return outs;
+}
+
+// ===================== 共通項目 =====================
+const $ = (id) => document.getElementById(id);
+const COMMON_IDS = ['c_station', 'c_grid', 'c_sota', 'c_sig', 'c_park1', 'c_park2', 'c_park3', 'c_jcc', 'c_qsl'];
+
+function readCommon() {
+  const g = (id) => $(id).value.trim();
+  return {
+    station: g('c_station'), grid: g('c_grid'), sota: g('c_sota'), sig: g('c_sig'),
+    parks: [g('c_park1'), g('c_park2'), g('c_park3')].filter(Boolean),
+    jcc: g('c_jcc'), qsl: g('c_qsl'),
+  };
+}
+
+function buildQslMsg() {
+  const c = readCommon();
+  let s = 'TNX QSO';
+  if (c.sota) s += ' SOTA ' + c.sota;
+  if (c.parks.length) s += (c.sig ? ' ' + c.sig : '') + ' ' + c.parks.join(' ');
+  // JCC/JCG 欄が番号だけ（例: 1001）のときは「JCC/JCG」を前に付ける。
+  // JCC1001 のように先頭が JCC/JCG なら、そのまま。
+  if (c.jcc) s += ' ' + (/^JC[CG]/i.test(c.jcc) ? c.jcc : 'JCC/JCG ' + c.jcc);
+  return s;
+}
+
+function refreshAuto(changedId) {
+  if (/^c_park/.test(changedId)) {
+    const any = readCommon().parks.length > 0;
+    const sig = $('c_sig');
+    if (any && !sig.value.trim()) sig.value = 'POTA';
+    if (!any) sig.value = '';
+  }
+  if (!state.qslManual) $('c_qsl').value = buildQslMsg();
+  $('autoBtn').disabled = !state.qslManual;
+}
+
+function setPending(v) {
+  state.pending = v && state.records.length > 0;
+  $('pending').hidden = !state.pending;
+}
+
+// 共通項目の値をすべての QSO に入れる
+function applyCommon() {
+  const c = readCommon();
+  const map = {
+    STATION_CALLSIGN: c.station, MY_GRIDSQUARE: c.grid, MY_SOTA_REF: c.sota,
+    MY_SIG: c.sig, MY_SIG_INFO: c.parks[0] || '', QSLMSG: c.qsl,
+  };
+  for (const rec of state.records) {
+    for (const [k, v] of Object.entries(map)) {
+      if (v) rec.set(k, v); else rec.delete(k);
+    }
+  }
+  for (const el of document.querySelectorAll('[data-note]')) el.textContent = '';
+  setPending(false);
+  state.dirty = true;
+  renderTable();
+}
+
+const COMMON_LABELS = [
+  ['STATION_CALLSIGN', 'c_station'], ['MY_GRIDSQUARE', 'c_grid'], ['MY_SOTA_REF', 'c_sota'],
+  ['MY_SIG', 'c_sig'], ['MY_SIG_INFO（公園1）', null], ['QSLMSG', 'c_qsl'],
+];
+
+async function confirmApply() {
+  const c = readCommon();
+  const vals = { c_station: c.station, c_grid: c.grid, c_sota: c.sota, c_sig: c.sig, c_qsl: c.qsl };
+  const lines = COMMON_LABELS.map(([label, id]) => {
+    const v = id ? vals[id] : (c.parks[0] || '');
+    return label + '： ' + (v ? v : '（空白 → このフィールドを消します）');
+  });
+  const ans = await showDialog(state.records.length + '件のQSOすべてに上書きします。よろしいですか？', lines,
+    [['cancel', 'やめる'], ['ok', 'OK', true]]);
+  return ans === 'ok';
+}
+
+// ===================== 表 =====================
+function columns() { return TABLE_ORDER.concat(state.extraCols); }
+
+function renderTable() {
+  const wrap = $('tableWrap');
+  wrap.textContent = '';
+  if (!state.records.length) {
+    const d = document.createElement('div');
+    d.id = 'empty';
+    d.textContent = state.fileName ? 'QSOがありません。「＋ 行を追加」で足せます' : 'ADIFファイルを開くと、ここにQSOの一覧が出ます';
+    wrap.appendChild(d);
+    updateFooter();
+    return;
+  }
+  const cols = columns();
+  const table = document.createElement('table');
+  const thead = table.createTHead();
+  const hr = thead.insertRow();
+  ['#', ...cols, ''].forEach((h, k) => {
+    const th = document.createElement('th');
+    th.textContent = h;
+    if (k >= 1 && k <= cols.length) {
+      th.dataset.c = k - 1;
+      th.className = 'colhead';
+      th.title = 'クリックでこの列をすべて選択（Ctrl を押しながらで追加）';
+    }
+    hr.appendChild(th);
+  });
+  const tbody = table.createTBody();
+  state.records.forEach((rec, i) => {
+    const tr = tbody.insertRow();
+    const num = tr.insertCell();
+    num.className = 'num';
+    num.textContent = i + 1;
+    num.dataset.row = i;
+    num.title = 'クリックでこの行をすべて選択（Ctrl を押しながらで追加）';
+    cols.forEach((col, c) => {
+      const td = tr.insertCell();
+      td.dataset.r = i;
+      td.dataset.c = c;
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.value = rec.get(col) || '';
+      inp.size = Math.max(4, Math.min(48, inp.value.length + 1, col === 'QSLMSG' ? 48 : 16));
+      inp.setAttribute('aria-label', (i + 1) + '行目 ' + col);
+      inp.addEventListener('input', () => setCellValue(i, c, inp.value, false));
+      inp.addEventListener('keydown', (e) => {
+        // Ctrl+Enter: 今のセルの文字を、選択しているすべてのセルに入れる（Excel と同じ）
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          fillSelected(inp.value);
+          return;
+        }
+        moveFocus(e, i, c);
+      });
+      td.appendChild(inp);
+    });
+    const del = tr.insertCell();
+    del.className = 'del';
+    const b = document.createElement('button');
+    b.textContent = '削除';
+    b.title = (i + 1) + '行目を削除';
+    b.addEventListener('click', async () => {
+      const ans = await showDialog((i + 1) + '行目のQSOを削除しますか？',
+        [(rec.get('CALL') || '（CALLなし）') + '  ' + (rec.get('QSO_DATE') || '') + ' ' + (rec.get('TIME_ON') || '')],
+        [['cancel', 'やめる'], ['ok', '削除する', true]]);
+      if (ans !== 'ok') return;
+      state.records.splice(i, 1);
+      state.dirty = true;
+      renderTable();
+    });
+    del.appendChild(b);
+  });
+  wrap.appendChild(table);
+  clearSelection();
+  updateFooter();
+}
+
+// 1つのセルの値を変える（手入力・まとめて入力の両方で使う）
+function setCellValue(r, c, v, updateInput) {
+  const cols = columns();
+  const col = cols[c];
+  const rec = state.records[r];
+  if (!rec || !col) return;
+  if (v === '') rec.delete(col); else rec.set(col, v);
+  state.dirty = true;
+  if (updateInput) {
+    const inp = cellInput(r, c);
+    if (inp) inp.value = v;
+  }
+  // P2P: 相手の公園（SIG_INFO）を入れたら、SIG が空なら POTA を入れる
+  if (col === 'SIG_INFO' && v.trim() && !(rec.get('SIG') || '').trim()) {
+    rec.set('SIG', 'POTA');
+    const sigInp = cellInput(r, cols.indexOf('SIG'));
+    if (sigInp) sigInp.value = 'POTA';
+  }
+  if (col === 'QSO_DATE' || col === 'MY_SOTA_REF' || col === 'MY_SIG_INFO') updateFooter();
+}
+
+function cellInput(r, c) {
+  const td = $('tableWrap').querySelector('td[data-r="' + r + '"][data-c="' + c + '"]');
+  return td ? td.querySelector('input') : null;
+}
+
+// ===================== セルの選択（Excel 風） =====================
+const sel = { cells: new Set(), anchor: null, dragging: false };
+const key = (r, c) => r + ',' + c;
+
+function paintSelection() {
+  for (const td of $('tableWrap').querySelectorAll('td[data-c]')) {
+    td.classList.toggle('sel', sel.cells.has(key(td.dataset.r, td.dataset.c)));
+  }
+  // 選んだセルがある行の番号・列の名前も色を変える
+  const rows = new Set(), cs = new Set();
+  for (const k of sel.cells) { const [r, c] = k.split(','); rows.add(r); cs.add(c); }
+  for (const th of $('tableWrap').querySelectorAll('th.colhead')) th.classList.toggle('selhead', cs.has(th.dataset.c));
+  for (const td of $('tableWrap').querySelectorAll('td.num')) td.classList.toggle('selhead', rows.has(td.dataset.row));
+  const n = sel.cells.size;
+  const info = $('selInfo');
+  info.textContent = n ? '選択中: ' + n + 'セル' + (n > 1 ? '（右クリックでまとめて入力）' : '') : 'セルを選んでください';
+  info.classList.toggle('on', n > 0);
+  $('clearSelBtn').disabled = n === 0;
+}
+
+function clearSelection() {
+  sel.cells.clear();
+  sel.anchor = null;
+  paintSelection();
+}
+
+function selectRect(a, b, add) {
+  if (!add) sel.cells.clear();
+  const r0 = Math.min(a.r, b.r), r1 = Math.max(a.r, b.r);
+  const c0 = Math.min(a.c, b.c), c1 = Math.max(a.c, b.c);
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) sel.cells.add(key(r, c));
+}
+
+function cellPos(td) { return { r: +td.dataset.r, c: +td.dataset.c }; }
+
+function onTableMouseDown(e) {
+  if (e.button !== 0) return;
+  const t = e.target;
+  // 列の見出し → その列をすべて選択
+  const th = t.closest('th.colhead');
+  if (th) {
+    const c = +th.dataset.c;
+    if (!(e.ctrlKey || e.metaKey)) sel.cells.clear();
+    for (let r = 0; r < state.records.length; r++) sel.cells.add(key(r, c));
+    sel.anchor = { r: 0, c };
+    paintSelection();
+    return;
+  }
+  // 行番号 → その行をすべて選択
+  const num = t.closest('td.num');
+  if (num) {
+    const r = +num.dataset.row;
+    if (!(e.ctrlKey || e.metaKey)) sel.cells.clear();
+    for (let c = 0; c < columns().length; c++) sel.cells.add(key(r, c));
+    sel.anchor = { r, c: 0 };
+    paintSelection();
+    return;
+  }
+  const td = t.closest('td[data-c]');
+  if (!td) return;
+  const p = cellPos(td);
+  if (e.shiftKey && sel.anchor) {
+    // Shift+クリック: 最初のセルから四角く選ぶ
+    e.preventDefault();
+    selectRect(sel.anchor, p, false);
+  } else if (e.ctrlKey || e.metaKey) {
+    // Ctrl+クリック: 1つずつ足す・外す
+    const k = key(p.r, p.c);
+    if (sel.cells.has(k)) sel.cells.delete(k); else sel.cells.add(k);
+    sel.anchor = p;
+  } else {
+    sel.cells.clear();
+    sel.cells.add(key(p.r, p.c));
+    sel.anchor = p;
+    sel.dragging = true;
+  }
+  paintSelection();
+}
+
+// ---- ドラッグ中の選択の広げ方と、表の自動スクロール ----
+// マウスが表の端（EDGE ピクセル以内）や表の外に出たら、その方向へスクロールし続ける。
+// 端から離れるほど速くスクロールする。
+const EDGE = 36;
+const auto = { x: 0, y: 0, raf: 0 };
+
+// 表の中の「見えている範囲」（見出し行と、スクロールバーを除く）
+function tableViewRect() {
+  const wrap = $('tableWrap');
+  const r = wrap.getBoundingClientRect();
+  const head = wrap.querySelector('thead');
+  const left = r.left + wrap.clientLeft;
+  const top = r.top + wrap.clientTop + (head ? head.offsetHeight : 0);
+  return { left, top, right: left + wrap.clientWidth, bottom: r.top + wrap.clientTop + wrap.clientHeight };
+}
+
+function onDragMove(e) {
+  if (!sel.dragging || !sel.anchor) return;
+  auto.x = e.clientX;
+  auto.y = e.clientY;
+  if (extendToPointer() && sel.cells.size > 1) e.preventDefault();
+  if (!auto.raf) auto.raf = setTimeout(autoScrollStep, 16);
+}
+
+// マウスの位置にあるセルまで選択を広げる（表の外にいるときは、いちばん近い端のセル）
+function extendToPointer() {
+  const v = tableViewRect();
+  const x = Math.min(Math.max(auto.x, v.left + 2), v.right - 2);
+  const y = Math.min(Math.max(auto.y, v.top + 2), v.bottom - 2);
+  const el = document.elementFromPoint(x, y);
+  const td = el && el.closest('#tableWrap td[data-c]');
+  if (!td) return false;
+  const p = cellPos(td);
+  // 最初のセルの中だけで動かしているあいだは、文字の選択（編集）をじゃましない
+  if (p.r === sel.anchor.r && p.c === sel.anchor.c && sel.cells.size === 1) return false;
+  if (!$('tableWrap').classList.contains('dragging')) {
+    // ドラッグ中は文字の選択をやめ、セルを四角く選ぶ
+    window.getSelection().removeAllRanges();
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    $('tableWrap').classList.add('dragging');
+  }
+  selectRect(sel.anchor, p, false);
+  paintSelection();
+  return true;
+}
+
+function autoScrollStep() {
+  auto.raf = 0;
+  if (!sel.dragging || !$('tableWrap').classList.contains('dragging')) return;
+  const wrap = $('tableWrap');
+  const v = tableViewRect();
+  const speed = (d) => Math.min(40, Math.max(3, d / 3));
+  let dx = 0, dy = 0;
+  if (auto.y < v.top + EDGE) dy = -speed(v.top + EDGE - auto.y);
+  else if (auto.y > v.bottom - EDGE) dy = speed(auto.y - (v.bottom - EDGE));
+  if (auto.x < v.left + EDGE) dx = -speed(v.left + EDGE - auto.x);
+  else if (auto.x > v.right - EDGE) dx = speed(auto.x - (v.right - EDGE));
+  if (!dx && !dy) return;
+  const beforeL = wrap.scrollLeft, beforeT = wrap.scrollTop;
+  wrap.scrollLeft += dx;
+  wrap.scrollTop += dy;
+  if (wrap.scrollLeft !== beforeL || wrap.scrollTop !== beforeT) extendToPointer();
+  // マウスを止めていても、端にいるあいだはスクロールし続ける
+  auto.raf = setTimeout(autoScrollStep, 16);
+}
+
+function endDrag() {
+  sel.dragging = false;
+  if (auto.raf) { clearTimeout(auto.raf); auto.raf = 0; }
+  $('tableWrap').classList.remove('dragging');
+}
+
+// 右クリック: 複数のセルを選んでいれば、入れる文字を聞くダイアログを出す
+async function onTableContextMenu(e) {
+  const td = e.target.closest('td[data-c]');
+  if (!td) return;
+  const k = key(td.dataset.r, td.dataset.c);
+  // 選んでいないセルや、1つだけのときは、いつもの右クリックメニュー（コピー・貼り付けなど）
+  if (sel.cells.size < 2 || !sel.cells.has(k)) return;
+  e.preventDefault();
+  endDrag();
+  const text = await showInputDialog('選択した' + sel.cells.size + '個のセルに入れる文字',
+    '選んだセルの中身を、この文字に置き換えます。空のまま入れると、セルを空にします。');
+  if (text === null) return;
+  await fillSelected(text);
+}
+
+// 文字を入れてもらうダイアログ。OK なら入れた文字、やめたら null を返す
+function showInputDialog(title, note) {
+  return new Promise((resolve) => {
+    const dlg = $('dlg');
+    $('dlgTitle').textContent = title;
+    const body = $('dlgBody');
+    body.textContent = '';
+    const p = document.createElement('p');
+    p.textContent = note;
+    p.style.margin = '0 0 8px';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.style.width = '100%';
+    inp.placeholder = '例: JP-0001';
+    inp.setAttribute('aria-label', '入れる文字');
+    body.append(p, inp);
+    const bb = $('dlgBtns');
+    bb.textContent = '';
+    // ボタン・Enter で閉じたら、その場で答えを返す（close イベントだけに頼らない）
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; resolve(v); if (dlg.open) dlg.close(); };
+    const cancel = document.createElement('button');
+    cancel.textContent = 'やめる';
+    cancel.addEventListener('click', () => finish(null));
+    const ok = document.createElement('button');
+    ok.textContent = '入れる';
+    ok.className = 'primary';
+    ok.addEventListener('click', () => finish(inp.value));
+    inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); finish(inp.value); } });
+    bb.append(cancel, ok);
+    dlg.onclose = () => finish(null); // Esc キーで閉じたとき
+    dlg.showModal();
+    inp.focus();
+  });
+}
+
+async function fillSelected(text) {
+  const n = sel.cells.size;
+  if (!n) return;
+  if (text === '') {
+    const ans = await showDialog('選択した' + n + '個のセルを空にします', ['空にしたセルのフィールドは、出力に書かれなくなります。よろしいですか？'],
+      [['cancel', 'やめる'], ['ok', '空にする', true]]);
+    if (ans !== 'ok') return;
+  }
+  for (const k of sel.cells) {
+    const [r, c] = k.split(',').map(Number);
+    setCellValue(r, c, text, true);
+  }
+  updateFooter();
+}
+
+// Enter・上下の矢印でセルを移動（Excel 風）
+function moveFocus(e, row, col) {
+  let r = row, c = col;
+  if (e.key === 'Enter' || e.key === 'ArrowDown') r++;
+  else if (e.key === 'ArrowUp') r--;
+  else return;
+  e.preventDefault();
+  if (e.key === 'Enter' && e.shiftKey) r = row - 1;
+  const tbody = $('tableWrap').querySelector('tbody');
+  if (!tbody || r < 0 || r >= tbody.rows.length) return;
+  const inp = tbody.rows[r].cells[c + 1].querySelector('input');
+  if (inp) { inp.focus(); inp.select(); }
+}
+
+function addRow() {
+  const c = readCommon();
+  const rec = new Map();
+  const last = state.records[state.records.length - 1];
+  const put = (k, v) => { if (v) rec.set(k, v); };
+  put('STATION_CALLSIGN', c.station);
+  put('MY_GRIDSQUARE', c.grid);
+  put('MY_SOTA_REF', c.sota);
+  put('MY_SIG', c.sig);
+  put('MY_SIG_INFO', c.parks[0] || '');
+  put('QSO_DATE', last ? last.get('QSO_DATE') : '');
+  put('QSLMSG', c.qsl);
+  state.records.push(rec);
+  state.dirty = true;
+  renderTable();
+  const wrap = $('tableWrap');
+  wrap.scrollTop = wrap.scrollHeight;
+  const inp = wrap.querySelector('tbody tr:last-child input');
+  if (inp) inp.focus();
+}
+
+function updateFooter() {
+  const loaded = !!state.fileName;
+  $('qsoCount').textContent = state.records.length;
+  const outs = state.records.length ? planOutputs() : [];
+  $('fileCount').textContent = outs.length;
+  const ul = $('outList');
+  ul.textContent = '';
+  for (const o of outs) {
+    const li = document.createElement('li');
+    li.textContent = o.name + '（' + o.records.length + '件）';
+    ul.appendChild(li);
+  }
+  $('saveBtn').disabled = !outs.length;
+  $('applyBtn').disabled = !state.records.length;
+  $('addRowBtn').disabled = !loaded;
+}
+
+// ===================== 開く =====================
+async function openFile(file) {
+  if (state.dirty) {
+    const ans = await showDialog('保存していない変更があります', ['別のファイルを開くと、今の変更は消えます。開きますか？'],
+      [['cancel', 'やめる'], ['ok', '開く', true]]);
+    if (ans !== 'ok') return;
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const raw = parseAdif(bytes);
+  // 先頭の QSO の MY_SIG_INFO（カンマでつながっていれば全部の公園）。自動変換で1つ目にそろえる前に取っておく
+  state.fileParks = raw.length ? (raw[0].get('MY_SIG_INFO') || '').split(',').map(s => s.trim()).filter(Boolean) : [];
+  state.records = raw.map(autoConvert);
+  state.fileName = file.name;
+  // ORDER 以外の列（出てきた順）
+  const extra = [];
+  for (const r of state.records) for (const k of r.keys()) if (!ORDER.includes(k) && !extra.includes(k)) extra.push(k);
+  state.extraCols = extra;
+  $('fileName').textContent = file.name + '（' + state.records.length + '件）';
+  fillCommonFromRecords();
+  state.dirty = false;
+  renderTable();
+}
+
+// ADIF から共通項目の欄に入れる（仕様 3.1）
+function fillCommonFromRecords() {
+  const recs = state.records;
+  const firstVal = (k) => (recs.length ? (recs[0].get(k) || '') : '');
+  const differs = (k) => recs.some(r => (r.get(k) || '') !== firstVal(k));
+  const set = (id, v) => { $(id).value = v; };
+  set('c_station', firstVal('STATION_CALLSIGN'));
+  set('c_grid', firstVal('MY_GRIDSQUARE'));
+  set('c_sota', firstVal('MY_SOTA_REF'));
+  set('c_sig', firstVal('MY_SIG'));
+  const parks = state.fileParks || [];
+  set('c_park1', parks[0] || ''); set('c_park2', parks[1] || ''); set('c_park3', parks[2] || '');
+  const jcc = jccFromFileName(state.fileName);
+  set('c_jcc', jcc);
+  $('jccHint').textContent = jcc ? '（ファイル名から読み取り）' : '';
+  for (const el of document.querySelectorAll('[data-note]')) {
+    el.textContent = differs(el.dataset.note) ? 'QSOごとに値が異なります' : '';
+  }
+  const qsl = firstVal('QSLMSG');
+  state.qslManual = !!qsl;
+  if (qsl) set('c_qsl', qsl);
+  if (!$('c_sig').value && parks.length) $('c_sig').value = 'POTA';
+  refreshAuto('');
+  // 表の中身と共通項目が食い違っていれば「未反映」
+  setPending(commonDiffersFromTable());
+}
+
+function commonDiffersFromTable() {
+  const c = readCommon();
+  const want = { STATION_CALLSIGN: c.station, MY_GRIDSQUARE: c.grid, MY_SOTA_REF: c.sota,
+    MY_SIG: c.sig, MY_SIG_INFO: c.parks[0] || '', QSLMSG: c.qsl };
+  return state.records.some(r => Object.entries(want).some(([k, v]) => (r.get(k) || '') !== v));
+}
+
+// ===================== 保存 =====================
+async function save() {
+  if (state.pending) {
+    const ans = await showDialog('共通項目が、まだ表に反映されていません', [
+      '「反映して保存」：共通項目を全QSOに入れてから保存します（空白の項目はそのフィールドを消します）。',
+      '「反映せずに保存」：今の表の内容のまま保存します。',
+    ], [['cancel', 'やめる'], ['raw', '反映せずに保存'], ['apply', '反映して保存', true]]);
+    if (ans === 'cancel' || !ans) return;
+    if (ans === 'apply') applyCommon();
+  }
+  const outs = planOutputs();
+  if (!outs.length) return;
+
+  const canPick = typeof window.showDirectoryPicker === 'function';
+  let dir = null;
+  if (canPick) {
+    try {
+      dir = await window.showDirectoryPicker({ id: 'adif-out', mode: 'readwrite' });
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      await showDialog('保存先のフォルダを開けませんでした', [String(e && e.message || e)], [['ok', 'OK', true]]);
+      return;
+    }
+  }
+  // 確認（作るファイル名と件数）
+  const lines = [];
+  for (const o of outs) {
+    let exists = false;
+    if (dir) { try { await dir.getFileHandle(o.name); exists = true; } catch (_) { /* なし */ } }
+    lines.push(o.name + '（' + o.records.length + '件）' + (exists ? ' ※同じ名前のファイルがあるので上書きします' : ''));
+  }
+  const where = dir ? '保存先フォルダ: ' + dir.name : 'ダウンロードフォルダに1ファイルずつ保存します';
+  const ok = await showDialog(outs.length + '個のファイルを保存します', [where, ...lines], [['cancel', 'やめる'], ['ok', '保存する', true]]);
+  if (ok !== 'ok') return;
+
+  try {
+    for (const o of outs) {
+      const text = buildAdif(o.records);
+      if (dir) {
+        const fh = await dir.getFileHandle(o.name, { create: true });
+        const w = await fh.createWritable();
+        await w.write(text);
+        await w.close();
+      } else {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+        a.download = o.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+  } catch (e) {
+    await showDialog('保存に失敗しました', [String(e && e.message || e)], [['ok', 'OK', true]]);
+    return;
+  }
+  state.dirty = false;
+  await showDialog('保存しました', outs.map(o => o.name), [['ok', 'OK', true]]);
+}
+
+// ===================== ダイアログ =====================
+function showDialog(title, lines, buttons) {
+  return new Promise((resolve) => {
+    const dlg = $('dlg');
+    $('dlgTitle').textContent = title;
+    const body = $('dlgBody');
+    body.textContent = '';
+    if (lines && lines.length) {
+      const ul = document.createElement('ul');
+      for (const l of lines) { const li = document.createElement('li'); li.textContent = l; ul.appendChild(li); }
+      body.appendChild(ul);
+    }
+    const bb = $('dlgBtns');
+    bb.textContent = '';
+    let focusBtn = null;
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; resolve(v); if (dlg.open) dlg.close(); };
+    for (const [val, label, primary] of buttons) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      if (primary) { b.className = 'primary'; focusBtn = b; }
+      b.addEventListener('click', () => finish(val));
+      bb.appendChild(b);
+    }
+    dlg.onclose = () => finish('cancel'); // Esc キーで閉じたとき
+    dlg.showModal();
+    if (focusBtn) focusBtn.focus();
+  });
+}
+
+// ===================== イベント =====================
+$('openBtn').addEventListener('click', () => $('fileInput').click());
+$('fileInput').addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (f) openFile(f);
+  e.target.value = '';
+});
+for (const id of COMMON_IDS) {
+  const el = $(id);
+  el.addEventListener('input', () => {
+    if (el.hasAttribute('data-upper')) {
+      const p = el.selectionStart;
+      el.value = el.value.toUpperCase();
+      el.setSelectionRange(p, p);
+    }
+    if (id === 'c_qsl') { state.qslManual = true; $('autoBtn').disabled = false; }
+    else refreshAuto(id);
+    setPending(true);
+  });
+}
+$('autoBtn').addEventListener('click', () => {
+  state.qslManual = false;
+  refreshAuto('');
+  setPending(true);
+});
+$('applyBtn').addEventListener('click', async () => { if (await confirmApply()) applyCommon(); });
+$('addRowBtn').addEventListener('click', addRow);
+$('tableWrap').addEventListener('mousedown', onTableMouseDown);
+window.addEventListener('mousemove', onDragMove);
+window.addEventListener('mouseup', endDrag);
+$('tableWrap').addEventListener('contextmenu', onTableContextMenu);
+$('clearSelBtn').addEventListener('click', clearSelection);
+$('saveBtn').addEventListener('click', save);
+
+// ドラッグ＆ドロップ
+let dragDepth = 0;
+window.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('dragging');
+  const f = e.dataTransfer && e.dataTransfer.files[0];
+  if (f) openFile(f);
+});
+window.addEventListener('beforeunload', (e) => { if (state.dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+// 開いた直後は QSL MSG 欄を空にしておき、入力例（薄い文字）を見せる
+$('autoBtn').disabled = true;
+</script>
+</body>
+</html>

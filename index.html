@@ -97,18 +97,13 @@
   <div class="grid">
     <label for="c_station">Station Callsign</label>
     <div class="field"><input type="text" id="c_station" data-upper placeholder="例: JA1ABC/1"><span class="note" data-note="STATION_CALLSIGN"></span></div>
-    <label for="c_grid">My Grid</label>
-    <div class="field"><input type="text" id="c_grid" placeholder="例: PM95ur"><span class="note" data-note="MY_GRIDSQUARE"></span></div>
-
     <label for="c_sota">My SOTA Ref</label>
     <div class="field"><input type="text" id="c_sota" data-upper placeholder="例: JA/TK-001"><span class="note" data-note="MY_SOTA_REF"></span></div>
-    <label for="c_sig">My SIG</label>
-    <div class="field"><input type="text" id="c_sig" data-upper placeholder="例: POTA"><span class="note" data-note="MY_SIG"></span></div>
 
     <label for="c_park1">POTA公園1</label>
     <div class="field"><input type="text" id="c_park1" data-upper placeholder="例: JP-0001"><span class="note" data-note="MY_SIG_INFO"></span></div>
-    <label for="c_jcc">JCC/JCG</label>
-    <div class="field"><input type="text" id="c_jcc" data-upper placeholder="例: JCC1001 または 1001"><span class="hint" id="jccHint"></span></div>
+    <label for="c_sig">My SIG</label>
+    <div class="field"><input type="text" id="c_sig" data-upper placeholder="例: POTA"><span class="note" data-note="MY_SIG"></span></div>
 
     <label for="c_park2">POTA公園2</label>
     <div class="field"><input type="text" id="c_park2" data-upper placeholder="例: JP-0002"><span class="hint">（2ferのとき）</span></div>
@@ -117,6 +112,12 @@
     <label for="c_park3">POTA公園3</label>
     <div class="field"><input type="text" id="c_park3" data-upper placeholder="例: JP-0003"><span class="hint">（3ferのとき）</span></div>
     <span></span><span></span>
+
+    <!-- My Grid と JCC/JCG は QSL MSG のすぐ上（2026-11-17 ユーザーの希望） -->
+    <label for="c_grid">My Grid</label>
+    <div class="field"><input type="text" id="c_grid" placeholder="例: PM95ur"><span class="note" data-note="MY_GRIDSQUARE"></span></div>
+    <label for="c_jcc">JCC/JCG</label>
+    <div class="field"><input type="text" id="c_jcc" data-upper placeholder="例: JCC1001 または 1001"><span class="hint" id="jccHint"></span></div>
   </div>
   <div class="qslrow">
     <label for="c_qsl">QSL MSG</label>

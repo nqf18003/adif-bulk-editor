@@ -47,8 +47,7 @@
   .tplrow { margin-top: 6px; }
   .tplrow label { color: var(--muted); }
   .tplrow .hint { white-space: normal; }
-  .outopts { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-  .outopts label { display: flex; gap: 4px; align-items: center; white-space: nowrap; cursor: pointer; }
+  .outrule { color: var(--muted); font-size: 12px; }
   select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--cell-bg); color: var(--text); }
   dialog .names { display: grid; grid-template-columns: 1fr max-content; gap: 6px 8px; align-items: center; margin: 8px 0; }
   dialog .names input { min-width: min(460px, 60vw); }
@@ -172,10 +171,7 @@
     <span>QSO数: <b id="qsoCount">0</b></span>
     <span>出力予定: <b id="fileCount">0</b>ファイル</span>
     <span style="flex:1"></span>
-    <span class="outopts">
-      <label><input type="checkbox" id="splitChk">日付・公園ごとにファイルを分ける</label>
-      <label>ファイル名 <select id="nameMode"><option value="orig">元のファイル名</option><option value="rule">決まりの形（日付-SOTA-山頂-POTA-公園-JCC）</option></select></label>
-    </span>
+    <span class="outrule">日付・公園ごとにファイルを分け、名前は「日付-SOTA-山頂-POTA-公園-JCC.adi」（2fer・3fer の公園2・3は sub 付き）</span>
     <button id="saveBtn" class="primary" disabled>ADIFを保存</button>
   </footer>
   <ul id="outList"></ul>
@@ -243,8 +239,6 @@ const QSL_AUTO_KEY = 'adifBulkEditor.qslAuto';
 function loadQslAuto() { try { return localStorage.getItem(QSL_AUTO_KEY) === '1'; } catch (e) { return false; } }
 function saveQslAuto(v) { try { localStorage.setItem(QSL_AUTO_KEY, v ? '1' : '0'); } catch (e) { /* 覚えられなくても動く */ } }
 // 保存の分け方・ファイル名の付け方・QSL MSG のひな形（仕様 11。このブラウザーが覚える）
-const SPLIT_KEY = 'adifBulkEditor.split';
-const NAME_MODE_KEY = 'adifBulkEditor.nameMode';
 const QSL_TPL_KEY = 'adifBulkEditor.qslTemplate';
 const DEFAULT_QSL_TPL = 'TNX QSO {SOTA} {POTA} {JCC}';
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -394,26 +388,9 @@ function makeFileName(date, sota, park, jcc, isSub) {
   return (isSub ? 'sub' : '') + (parts.join('-') || 'output') + '.adi';
 }
 
-// 元のファイル名（拡張子なし）。ファイルが無いときは output
-function baseName() { return safeName((state.fileName || 'output').replace(/\.[^.]*$/, '')) || 'output'; }
-// ファイル名（仕様 5.3・11）。決まりの形か、元のファイル名に _edit（分けるときは日付・sub の公園）を付ける
-function outName(date, sota, park, jcc, isSub, split) {
-  if ($('nameMode').value === 'rule') return makeFileName(date, sota, park, jcc, isSub);
-  let n = baseName() + '_edit';
-  if (split && date) n += '-' + date;
-  if (isSub && park) n += '-' + safeName(park);
-  return (isSub ? 'sub' : '') + n + '.adi';
-}
-
+// 出力するファイル（仕様 5・11）。いつも UTC 日付ごと・公園ごとに分け、名前は決まりの形（2026-11-18 ユーザーの希望）
 function planOutputs() {
   const c = readCommon();
-  // 分けないとき: 全QSOを1つのファイルに（公園2・3の sub ファイルは作らない）
-  if (!$('splitChk').checked) {
-    if (!state.records.length) return [];
-    const r0 = state.records[0];
-    const g = (k) => (r0.get(k) || '').trim();
-    return [{ name: outName(g('QSO_DATE'), g('MY_SOTA_REF'), g('MY_SIG_INFO'), c.jcc, false, false), records: state.records }];
-  }
   const subParks = c.parks.slice(1);
   // UTC 日付ごとに分ける（元の順を保つ）
   const groups = new Map();
@@ -426,7 +403,7 @@ function planOutputs() {
   for (const [date, recs] of groups) {
     const sota = (recs[0].get('MY_SOTA_REF') || '').trim();
     const park1 = (recs[0].get('MY_SIG_INFO') || '').trim();
-    outs.push({ name: outName(date, sota, park1, c.jcc, false, true), records: recs });
+    outs.push({ name: makeFileName(date, sota, park1, c.jcc, false), records: recs });
     for (const p of subParks) {
       const subRecs = recs.map(r => {
         const m = new Map(r);
@@ -434,7 +411,7 @@ function planOutputs() {
         m.set('MY_SIG_INFO', p);
         return m;
       });
-      outs.push({ name: outName(date, sota, p, c.jcc, true, true), records: subRecs });
+      outs.push({ name: makeFileName(date, sota, p, c.jcc, true), records: subRecs });
     }
   }
   return outs;
@@ -903,6 +880,14 @@ async function openFile(file, opts = loadOpenOpts()) {
   const enc = opts.enc === 'utf-8' || opts.enc === 'shift_jis' ? opts.enc : detectEncoding(bytes);
   state.encoding = enc;
   const raw = parseAdif(bytes, enc);
+  // ADIF ではないファイル（QSO が無く、<EOH> も <EOR> も無い）は開かずに知らせる。今開いている表はそのまま（仕様 11）
+  if (!raw.length && !/<\s*(eoh|eor)\s*>/i.test(new TextDecoder(enc).decode(bytes))) {
+    await showDialog('ADIF ではないようです', [
+      '「' + file.name + '」から QSO を読み取れませんでした。',
+      'ログソフトから書き出した ADIF ファイル（.adi・.adif）を選んでください。',
+    ], [['ok', 'OK', true]]);
+    return;
+  }
   // 先頭の QSO の MY_SIG_INFO（カンマでつながっていれば全部の公園）。自動変換で1つ目にそろえる前に取っておく
   state.fileParks = raw.length ? (raw[0].get('MY_SIG_INFO') || '').split(',').map(s => s.trim()).filter(Boolean) : [];
   state.records = raw.map(r => autoConvert(r, opts));
@@ -1272,8 +1257,6 @@ function onTplChanged() {
 }
 $('qslTpl').addEventListener('input', onTplChanged);
 $('tplReset').addEventListener('click', () => { $('qslTpl').value = DEFAULT_QSL_TPL; onTplChanged(); });
-$('splitChk').addEventListener('change', () => { lsSet(SPLIT_KEY, $('splitChk').checked ? '1' : '0'); updateFooter(); });
-$('nameMode').addEventListener('change', () => { lsSet(NAME_MODE_KEY, $('nameMode').value); updateFooter(); });
 $('applyBtn').addEventListener('click', async () => { if (await confirmApply()) applyCommon(); });
 $('addRowBtn').addEventListener('click', addRow);
 $('tableWrap').addEventListener('mousedown', onTableMouseDown);
@@ -1333,8 +1316,8 @@ function setTableHeight(h) {
   if (saved > 0) setTableHeight(saved);
 }
 // 覚えている値（初期値: 分けない・元のファイル名・いつものひな形）
-$('splitChk').checked = lsGet(SPLIT_KEY) === '1';
-$('nameMode').value = lsGet(NAME_MODE_KEY) === 'rule' ? 'rule' : 'orig';
+// 分け方・ファイル名の選択は 2026-11-18 になくした（いつも分けて決まりの形）。前に覚えた値を消す
+try { localStorage.removeItem('adifBulkEditor.split'); localStorage.removeItem('adifBulkEditor.nameMode'); } catch (e) { /* なし */ }
 { const t = lsGet(QSL_TPL_KEY); $('qslTpl').value = t === null ? DEFAULT_QSL_TPL : t; }
 </script>
 </body>

@@ -48,6 +48,8 @@
   .tplrow label { color: var(--muted); }
   .tplrow .hint { white-space: normal; }
   .outrule { color: var(--muted); font-size: 12px; }
+  /* 保存のときにブラウザーが出す画面の予告（仕様 11） */
+  #saveHint { color: var(--muted); font-size: 12px; margin: 6px 0 0; line-height: 1.6; }
   select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--cell-bg); color: var(--text); }
   dialog .names { display: grid; grid-template-columns: 1fr max-content; gap: 6px 8px; align-items: center; margin: 8px 0; }
   dialog .names input { min-width: min(460px, 60vw); }
@@ -174,6 +176,7 @@
     <span class="outrule">日付・公園ごとにファイルを分け、名前は「日付-SOTA-山頂-POTA-公園-JCC.adi」（2fer・3fer の公園2・3は sub 付き）</span>
     <button id="saveBtn" class="primary" disabled>ADIFを保存</button>
   </footer>
+  <p id="saveHint">「ADIFを保存」を押すと、ファイルをダウンロードのフォルダに1つずつ保存します（パソコンもスマホも同じ）。ファイルが2つ以上あるときは、初めてのときにブラウザーが「複数のファイルのダウンロード」を許可するか聞くので、「許可する」を押してください。同じ名前のファイルがすでにあるときは、ブラウザーが名前の後ろに (1) などを付けて保存します（上書きはしないので、元のファイルは消えません）。</p>
   <ul id="outList"></ul>
 </section>
 
@@ -958,47 +961,34 @@ async function save() {
   const outs = planOutputs();
   if (!outs.length) return;
 
-  const canPick = typeof window.showDirectoryPicker === 'function';
-  let dir = null;
-  if (canPick) {
-    try {
-      dir = await window.showDirectoryPicker({ id: 'adif-out', mode: 'readwrite' });
-    } catch (e) {
-      if (e && e.name === 'AbortError') return;
-      await showDialog('保存先のフォルダを開けませんでした', [String(e && e.message || e)], [['ok', 'OK', true]]);
-      return;
-    }
-  }
   // 確認（作るファイル名と件数。名前はここで直せる）
-  const names = await askFileNames(outs, dir);
+  const names = await askFileNames(outs);
   if (!names) return;
   outs.forEach((o, i) => { o.name = names[i]; });
 
+  // いつもダウンロードのフォルダに1つずつ保存する（パソコンもスマホも同じ。仕様 11）。
+  // ブラウザーは同じ名前のファイルを上書きせず、名前に (1) などを付けるので、元のファイルが消えることはない
   try {
     for (const o of outs) {
       const text = buildAdif(o.records);
-      if (dir) {
-        const fh = await dir.getFileHandle(o.name, { create: true });
-        const w = await fh.createWritable();
-        await w.write(text);
-        await w.close();
-      } else {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-        a.download = o.name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-        await new Promise(r => setTimeout(r, 300));
-      }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+      a.download = o.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      await new Promise(r => setTimeout(r, 300));
     }
   } catch (e) {
     await showDialog('保存に失敗しました', [String(e && e.message || e)], [['ok', 'OK', true]]);
     return;
   }
   state.dirty = false;
-  await showDialog('保存しました', outs.map(o => o.name), [['ok', 'OK', true]]);
+  await showDialog('ダウンロードのフォルダに保存しました', [
+    ...outs.map(o => o.name),
+    '同じ名前のファイルがすでにあったときは、ブラウザーが名前の後ろに (1) などを付けています。',
+  ], [['ok', 'OK', true]]);
 }
 
 // 保存の前の確認。ファイル名を1つずつ直せる。直した名前の配列を返す（やめたら null）
@@ -1007,25 +997,18 @@ function fixName(n) {
   if (n && !/\.(adi|adif)$/i.test(n)) n += '.adi';
   return n;
 }
-function askFileNames(outs, dir) {
+function askFileNames(outs) {
   return new Promise((resolve) => {
     const dlg = $('dlg');
     $('dlgTitle').textContent = outs.length + '個のファイルを保存します';
     const body = $('dlgBody');
     body.textContent = '';
     const where = document.createElement('p');
-    where.textContent = (dir ? '保存先フォルダ: ' + dir.name : 'ダウンロードフォルダに1ファイルずつ保存します') + '。ファイル名は、ここで直せます。';
+    where.textContent = 'ダウンロードのフォルダに1ファイルずつ保存します。ファイル名は、ここで直せます。';
     body.appendChild(where);
     const grid = document.createElement('div');
     grid.className = 'names';
     const inputs = [];
-    const checkOne = async (inp, note, count) => {
-      const n = fixName(inp.value);
-      let exists = false;
-      if (dir && n) { try { await dir.getFileHandle(n); exists = true; } catch (_) { /* なし */ } }
-      note.textContent = count + '件' + (exists ? ' ※同じ名前のファイルがあるので上書きします' : '');
-      note.className = exists ? 'note' : 'hint';
-    };
     outs.forEach((o, i) => {
       const inp = document.createElement('input');
       inp.type = 'text';
@@ -1033,10 +1016,10 @@ function askFileNames(outs, dir) {
       inp.id = 'fname_' + i;
       inp.spellcheck = false;
       const note = document.createElement('span');
+      note.className = 'hint';
+      note.textContent = o.records.length + '件';
       grid.append(inp, note);
       inputs.push(inp);
-      checkOne(inp, note, o.records.length);
-      inp.addEventListener('input', () => checkOne(inp, note, o.records.length));
     });
     body.appendChild(grid);
     const err = document.createElement('p');
@@ -1054,19 +1037,11 @@ function askFileNames(outs, dir) {
     go.className = 'primary';
     go.id = 'fnameGo';
     go.textContent = '保存する';
-    go.addEventListener('click', async () => {
+    go.addEventListener('click', () => {
       const names = inputs.map(inp => fixName(inp.value));
       if (names.some(n => !n)) { err.textContent = 'ファイル名が空のものがあります。'; return; }
       const lower = names.map(n => n.toLowerCase());
       if (new Set(lower).size !== lower.length) { err.textContent = '同じファイル名が2つ以上あります。別の名前にしてください。'; return; }
-      // 元のファイルと同じ名前のファイルが保存先にあれば保存しない（元のファイルを上書きしないため。仕様 11）
-      const orig = (state.fileName || '').toLowerCase();
-      const i = orig ? lower.indexOf(orig) : -1;
-      if (i >= 0 && dir) {
-        let exists = false;
-        try { await dir.getFileHandle(names[i]); exists = true; } catch (_) { /* なし */ }
-        if (exists) { err.textContent = '「' + names[i] + '」は開いた元のファイルと同じ名前で、保存先にあります。元のファイルを上書きしないよう、別の名前にしてください。'; return; }
-      }
       finish(names);
     });
     bb.append(cancel, go);

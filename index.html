@@ -54,6 +54,8 @@
   dialog .names input { min-width: min(460px, 60vw); }
   dialog .err { color: var(--danger); font-size: 13px; margin: 6px 0 0; }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  /* テスト中のお知らせ（仕様 11） */
+  #testing { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn); border-radius: 6px; padding: 6px 12px; margin: 10px 16px 0; font-size: 13px; }
   #pending { color: var(--warn); background: var(--warn-bg); border-radius: 5px; padding: 3px 8px; font-size: 12px; }
   .tablewrap { overflow: auto; max-height: calc(100vh - 540px); min-height: 160px; border: 1px solid var(--line); border-radius: 6px; }
   /* 表の下のつまみ: ドラッグで表の高さを変える（仕様 11） */
@@ -93,6 +95,12 @@
   dialog .opts { display: grid; gap: 8px; margin: 6px 0 4px; }
   dialog .opts label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
   dialog .opts input { margin-top: 3px; }
+  dialog .optnote { color: var(--muted); font-size: 12px; }
+  dialog .ordbox { display: grid; gap: 4px; margin: 0 0 4px 26px; justify-items: start; }
+  dialog .ordbox label { color: var(--muted); font-size: 12px; cursor: default; }
+  dialog .ordbox textarea { width: min(600px, 75vw); font: 12px/1.4 Consolas, "Courier New", monospace; padding: 4px 6px;
+    border: 1px solid var(--line); border-radius: 5px; background: var(--cell-bg); color: var(--text); resize: vertical; }
+  dialog .ordbox button { padding: 3px 10px; font-size: 12px; }
   dialog .opts .encrow { align-items: center; margin-top: 4px; cursor: default; }
   dialog .hint { color: var(--muted, #888); font-size: 12px; margin: 8px 0 0; }
   dialog .btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
@@ -104,6 +112,8 @@
 </head>
 <body>
 <div id="drop">ここにADIFファイルを放してください</div>
+
+<div id="testing" role="note"><b>現在テスト中です。</b>保存したファイルは、SOTA・POTA・eQSL・LoTW にアップロードする前に中身を確かめてください（元のファイルは書き換えません）。</div>
 
 <header>
   <h1>ADIF一括編集ツール</h1>
@@ -241,6 +251,17 @@ function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return n
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 覚えられなくても動く */ } }
 // STATION_CALLSIGN を今の欄のフィールド（STATION_CALLSIGN か OPERATOR）に置き換えた並び
 const withStation = (list) => list.map(k => (k === 'STATION_CALLSIGN' ? state.stationKey : k));
+// 整列するときの並び順（仕様 11。利用者が決められる。ブラウザーが覚える。空なら初めの順 ORDER）
+const FIELD_ORDER_KEY = 'adifBulkEditor.fieldOrder';
+function parseOrder(text) {
+  const out = [];
+  for (const t of String(text || '').toUpperCase().split(/[\s,、，]+/)) if (/^[A-Z0-9_]+$/.test(t) && !out.includes(t)) out.push(t);
+  return out;
+}
+function fieldOrder() {
+  const list = parseOrder(lsGet(FIELD_ORDER_KEY));
+  return list.length ? list : ORDER.slice();
+}
 
 // ===================== ADIF 読み取り（仕様 7） =====================
 // 文字コードを見分ける（仕様 11）。UTF-8 として正しく読めれば UTF-8、読めなければ Shift_JIS
@@ -305,7 +326,11 @@ function autoConvert(rec, opts) {
   for (const [k, v] of rec) {
     if (k === 'QSO_DATE_OFF' && opts.dropDateOff) continue;
     if (k === 'OPERATOR' && opts.convertOp) {
-      if (!rec.has('STATION_CALLSIGN')) out.set('STATION_CALLSIGN', v);
+      // 項目名を変える。STATION_CALLSIGN がすでにあれば変えず、同じ値なら OPERATOR を消し、違う値なら残す（社団局など。仕様 11）
+      if (!rec.has('STATION_CALLSIGN')) { out.set('STATION_CALLSIGN', v); continue; }
+      const same = (rec.get('STATION_CALLSIGN') || '').trim().toUpperCase() === v.trim().toUpperCase();
+      if (same) continue;
+      out.set(k, v);
       continue;
     }
     // 公園がカンマでつながっていたら（移動運用ログの 2fer・3fer）、1つ目の公園にそろえる。全部の公園は開くときに公園1〜3の欄へ入れる（仕様 11）
@@ -334,7 +359,9 @@ function recordLine(rec) {
   const items = [];
   const put = (k) => { const v = rec.get(k); if (v !== undefined && v !== '') items.push('<' + k + ':' + byteLen(v) + '>' + v); };
   if (!state.sortFields) { for (const k of rec.keys()) put(k); return items.join(' ') + ' <EOR>'; } // 整列しない: 元の順（足した項目は後ろ）
-  const order = withStation(ORDER);
+  // STATION_CALLSIGN の位置には欄の行き先（OPERATOR のことがある）。ただし OPERATOR を自分で書いていればそのまま
+  const fo = fieldOrder();
+  const order = fo.includes('OPERATOR') ? fo : withStation(fo);
   for (const k of order) put(k);
   for (const k of rec.keys()) if (!order.includes(k)) put(k);
   return items.join(' ') + ' <EOR>';
@@ -1105,12 +1132,14 @@ function askOpenOpts(file) {
     const box = document.createElement('div');
     box.className = 'opts';
     const items = [
-      ['convertOp', 'OPERATOR を STATION_CALLSIGN に切り替える'],
+      ['convertOp', '項目名 OPERATOR を STATION_CALLSIGN に変える（中のコールサインはそのまま）',
+        'STATION_CALLSIGN がすでにあるときは変えません（OPERATOR も残します。同じコールサインなら OPERATOR は消します）'],
       ['dropDateOff', 'QSO_DATE_OFF を削除する'],
-      ['sort', '項目を整列する（保存するファイルの中の項目を、決まった順に並べる）'],
+      ['sort', '項目を整列する（保存するファイルの各QSOの中の項目を、下の並び順にそろえる）',
+        'ADIF では項目の順番に決まりはありません（アップロード先はどの順でも読めます）。読みやすさ・好みのための並べ替えです。QSO の順番や中身は変わりません'],
     ];
     const checks = {};
-    for (const [key, text] of items) {
+    for (const [key, text, note] of items) {
       const label = document.createElement('label');
       const cb = document.createElement('input');
       cb.type = 'checkbox';
@@ -1119,9 +1148,33 @@ function askOpenOpts(file) {
       checks[key] = cb;
       const span = document.createElement('span');
       span.textContent = text;
+      if (note) {
+        const sm = document.createElement('small');
+        sm.className = 'optnote';
+        sm.textContent = note;
+        span.append(document.createElement('br'), sm);
+      }
       label.append(cb, span);
       box.appendChild(label);
     }
+    // 整列するときの並び順（仕様 11）
+    const ordBox = document.createElement('div');
+    ordBox.className = 'ordbox';
+    const ordLabel = document.createElement('label');
+    ordLabel.htmlFor = 'opt_order';
+    ordLabel.textContent = '並び順（整列するとき。項目名をカンマか空白で区切る。書いていない項目は後ろに元の順で並びます）';
+    const ord = document.createElement('textarea');
+    ord.id = 'opt_order';
+    ord.rows = 3;
+    ord.spellcheck = false;
+    ord.value = fieldOrder().join(', ');
+    const ordReset = document.createElement('button');
+    ordReset.type = 'button';
+    ordReset.id = 'opt_orderReset';
+    ordReset.textContent = '初めの順に戻す';
+    ordReset.addEventListener('click', () => { ord.value = ORDER.join(', '); });
+    ordBox.append(ordLabel, ord, ordReset);
+    box.appendChild(ordBox);
     // 文字コード（仕様 11）
     const encRow = document.createElement('label');
     encRow.className = 'encrow';
@@ -1140,7 +1193,7 @@ function askOpenOpts(file) {
     body.appendChild(box);
     const hint = document.createElement('p');
     hint.className = 'hint';
-    hint.textContent = 'チェックと文字コードは、このブラウザーが覚えておきます（次に開くときも同じ）。';
+    hint.textContent = 'チェック・並び順・文字コードは、このブラウザーが覚えておきます（次に開くときも同じ）。';
     body.appendChild(hint);
     const bb = $('dlgBtns');
     bb.textContent = '';
@@ -1149,7 +1202,12 @@ function askOpenOpts(file) {
       if (done) return;
       done = true;
       let o = null;
-      if (ok) { o = { convertOp: checks.convertOp.checked, dropDateOff: checks.dropDateOff.checked, sort: checks.sort.checked, enc: $('opt_enc').value }; saveOpenOpts(o); }
+      if (ok) {
+        o = { convertOp: checks.convertOp.checked, dropDateOff: checks.dropDateOff.checked, sort: checks.sort.checked, enc: $('opt_enc').value };
+        saveOpenOpts(o);
+        const list = parseOrder($('opt_order').value);
+        lsSet(FIELD_ORDER_KEY, (list.length ? list : ORDER).join(', '));
+      }
       dlg.onclose = null;
       if (dlg.open) dlg.close();
       resolve(o);

@@ -42,10 +42,24 @@
   .note { color: var(--warn); font-size: 12px; white-space: nowrap; }
   .hint { color: var(--muted); font-size: 12px; white-space: nowrap; }
   .qslrow { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
-  .qslrow input { flex: 1; }
+  .qslrow input[type=text] { flex: 1; }
+  .qslrow .autochk { display: flex; gap: 4px; align-items: center; white-space: nowrap; cursor: pointer; }
+  .tplrow { margin-top: 6px; }
+  .tplrow label { color: var(--muted); }
+  .tplrow .hint { white-space: normal; }
+  .outopts { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .outopts label { display: flex; gap: 4px; align-items: center; white-space: nowrap; cursor: pointer; }
+  select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--cell-bg); color: var(--text); }
+  dialog .names { display: grid; grid-template-columns: 1fr max-content; gap: 6px 8px; align-items: center; margin: 8px 0; }
+  dialog .names input { min-width: min(460px, 60vw); }
+  dialog .err { color: var(--danger); font-size: 13px; margin: 6px 0 0; }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; align-items: center; }
   #pending { color: var(--warn); background: var(--warn-bg); border-radius: 5px; padding: 3px 8px; font-size: 12px; }
-  .tablewrap { overflow: auto; max-height: calc(100vh - 430px); min-height: 160px; border: 1px solid var(--line); border-radius: 6px; }
+  .tablewrap { overflow: auto; max-height: calc(100vh - 540px); min-height: 160px; border: 1px solid var(--line); border-radius: 6px; }
+  /* 表の下のつまみ: ドラッグで表の高さを変える（仕様 11） */
+  .grip { height: 12px; margin-top: 3px; border-radius: 4px; cursor: ns-resize; touch-action: none; user-select: none;
+    background: repeating-linear-gradient(to bottom, transparent 0 3px, var(--line) 3px 4px, transparent 4px 5px) center / 48px 100% no-repeat, var(--head-bg); }
+  .grip:hover, .grip.on { background-color: var(--sel-bg); }
   table { border-collapse: collapse; font-size: 13px; }
   th, td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 0; white-space: nowrap; }
   th { position: sticky; top: 0; background: var(--head-bg); padding: 5px 8px; text-align: left; z-index: 1; font-weight: 600; }
@@ -76,6 +90,11 @@
   dialog h2 { font-size: 16px; margin: 0 0 10px; }
   dialog ul { margin: 6px 0; padding-left: 20px; max-height: 50vh; overflow: auto; }
   dialog li { margin: 2px 0; word-break: break-all; }
+  dialog .opts { display: grid; gap: 8px; margin: 6px 0 4px; }
+  dialog .opts label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  dialog .opts input { margin-top: 3px; }
+  dialog .opts .encrow { align-items: center; margin-top: 4px; cursor: default; }
+  dialog .hint { color: var(--muted, #888); font-size: 12px; margin: 8px 0 0; }
   dialog .btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
   @media (max-width: 760px) {
     .grid { grid-template-columns: max-content 1fr; }
@@ -95,7 +114,7 @@
 
 <section class="panel" id="commonPanel">
   <div class="grid">
-    <label for="c_station">Station Callsign</label>
+    <label for="c_station">Station Callsign or Operator</label>
     <div class="field"><input type="text" id="c_station" data-upper placeholder="例: JA1xxx/1"><span class="note" data-note="STATION_CALLSIGN"></span></div>
     <label for="c_sota">My SOTA Ref</label>
     <div class="field"><input type="text" id="c_sota" data-upper placeholder="例: JA/TK-001"><span class="note" data-note="MY_SOTA_REF"></span></div>
@@ -121,14 +140,35 @@
   </div>
   <div class="qslrow">
     <label for="c_qsl">QSL MSG</label>
-    <input type="text" id="c_qsl" placeholder="例: TNX QSO SOTA JA/TK-001 POTA JP-0001 JCC1001（自動で作られます）">
+    <input type="text" id="c_qsl" placeholder="例: TNX QSO SOTA JA/TK-001 POTA JP-0001 JCC1001">
+    <label class="autochk"><input type="checkbox" id="qslAuto">自動で作る</label>
     <span class="note" data-note="QSLMSG"></span>
+  </div>
+  <div class="qslrow tplrow">
+    <label for="qslTpl">ひな形</label>
+    <input type="text" id="qslTpl" spellcheck="false">
+    <button id="tplReset">初めの形に戻す</button>
+    <span class="hint">「自動で作る」ときに使います。{SOTA} {POTA} {JCC} {MYCALL} {GRID} が値に置き換わります（空なら消えます）</span>
   </div>
   <div class="actions">
     <span id="pending" hidden>共通項目に、まだ表へ反映していない変更があります</span>
-    <button id="autoBtn">自動に戻す</button>
     <button id="applyBtn" class="primary" disabled>全QSOに反映</button>
   </div>
+</section>
+
+<!-- 保存の欄は表の上（2026-11-18 ユーザーの希望） -->
+<section class="panel">
+  <footer>
+    <span>QSO数: <b id="qsoCount">0</b></span>
+    <span>出力予定: <b id="fileCount">0</b>ファイル</span>
+    <span style="flex:1"></span>
+    <span class="outopts">
+      <label><input type="checkbox" id="splitChk">日付・公園ごとにファイルを分ける</label>
+      <label>ファイル名 <select id="nameMode"><option value="orig">元のファイル名</option><option value="rule">決まりの形（日付-SOTA-山頂-POTA-公園-JCC）</option></select></label>
+    </span>
+    <button id="saveBtn" class="primary" disabled>ADIFを保存</button>
+  </footer>
+  <ul id="outList"></ul>
 </section>
 
 <section class="panel">
@@ -139,20 +179,12 @@
       複数のセルを選んで<b>右クリック</b>すると、同じ文字をまとめて入れられます</span>
   </div>
   <div class="tablewrap" id="tableWrap"><div id="empty">ADIFファイルを開くと、ここにQSOの一覧が出ます</div></div>
+  <div class="grip" id="tableGrip" title="ドラッグで表の高さを変えます（ダブルクリックで元の高さに戻します）"></div>
   <div class="actions" style="justify-content:flex-start">
     <button id="addRowBtn" disabled>＋ 行を追加</button>
   </div>
 </section>
 
-<section class="panel">
-  <footer>
-    <span>QSO数: <b id="qsoCount">0</b></span>
-    <span>出力予定: <b id="fileCount">0</b>ファイル</span>
-    <span style="flex:1"></span>
-    <button id="saveBtn" class="primary" disabled>ADIFを保存</button>
-  </footer>
-  <ul id="outList"></ul>
-</section>
 
 <dialog id="dlg">
   <h2 id="dlgTitle"></h2>
@@ -179,15 +211,45 @@ const state = {
   fileName: '',
   records: [],      // 1QSO = Map(フィールド名 -> 値)。Map は元の順を覚えている
   extraCols: [],    // ORDER 以外のフィールド（出てきた順）
-  qslManual: false, // QSLMSG を手で直したか
   pending: false,   // 共通項目に未反映の変更があるか
   dirty: false,     // 保存していない変更があるか
+  stationKey: 'STATION_CALLSIGN', // 「Station Callsign or Operator」欄を入れるフィールド（OPERATOR のことがある）
+  sortFields: false, // 保存するときに項目を整列するか（開いたときの選択）
 };
 
+// ===================== 開くときの選択（仕様 11。このブラウザーが覚える） =====================
+const OPEN_OPTS_KEY = 'adifBulkEditor.openOptions';
+function loadOpenOpts() {
+  let o = {};
+  try { o = JSON.parse(localStorage.getItem(OPEN_OPTS_KEY) || '{}') || {}; } catch (e) { o = {}; }
+  const enc = ['utf-8', 'shift_jis'].includes(o.enc) ? o.enc : 'auto';
+  return { convertOp: o.convertOp === true, dropDateOff: o.dropDateOff === true, sort: o.sort === true, enc };
+}
+function saveOpenOpts(o) {
+  try { localStorage.setItem(OPEN_OPTS_KEY, JSON.stringify(o)); } catch (e) { /* 覚えられなくても開く */ }
+}
+// QSL MSG の「自動で作る」（仕様 11。このブラウザーが覚える。初期値は作らない）
+const QSL_AUTO_KEY = 'adifBulkEditor.qslAuto';
+function loadQslAuto() { try { return localStorage.getItem(QSL_AUTO_KEY) === '1'; } catch (e) { return false; } }
+function saveQslAuto(v) { try { localStorage.setItem(QSL_AUTO_KEY, v ? '1' : '0'); } catch (e) { /* 覚えられなくても動く */ } }
+// 保存の分け方・ファイル名の付け方・QSL MSG のひな形（仕様 11。このブラウザーが覚える）
+const SPLIT_KEY = 'adifBulkEditor.split';
+const NAME_MODE_KEY = 'adifBulkEditor.nameMode';
+const QSL_TPL_KEY = 'adifBulkEditor.qslTemplate';
+const DEFAULT_QSL_TPL = 'TNX QSO {SOTA} {POTA} {JCC}';
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 覚えられなくても動く */ } }
+// STATION_CALLSIGN を今の欄のフィールド（STATION_CALLSIGN か OPERATOR）に置き換えた並び
+const withStation = (list) => list.map(k => (k === 'STATION_CALLSIGN' ? state.stationKey : k));
+
 // ===================== ADIF 読み取り（仕様 7） =====================
-// バイト単位で読む（長さはバイト数のため。全角が入っても壊れない）
-function parseAdif(bytes) {
-  const dec = new TextDecoder('utf-8');
+// 文字コードを見分ける（仕様 11）。UTF-8 として正しく読めれば UTF-8、読めなければ Shift_JIS
+function detectEncoding(bytes) {
+  try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); return 'utf-8'; } catch (e) { return 'shift_jis'; }
+}
+// バイト単位で読む（長さはバイト数のため。全角が入っても壊れない）。enc は 'utf-8' か 'shift_jis'
+function parseAdif(bytes, enc = 'utf-8') {
+  const dec = new TextDecoder(enc);
   const n = bytes.length;
   let pos = 0;
   // ヘッダー: 先頭が '<' でなければヘッダーあり → <EOH> まで読み飛ばす
@@ -217,20 +279,32 @@ function parseAdif(bytes) {
     if (parts.length < 2) continue;
     const len = parseInt(parts[1], 10);
     if (!(len >= 0)) continue;
-    const value = dec.decode(bytes.subarray(pos, Math.min(n, pos + len)));
-    pos += len;
+    let stop = Math.min(n, pos + len);
+    // 長さを「文字数」で書くソフトのため（全角が入るとバイト数より短くなる）: 値に全角があり、
+    // 長さの後ろから次の '<' までに空白以外が残っていれば、そこまでを値とする（仕様 11）
+    let multi = false;
+    for (let i = pos; i < stop; i++) if (bytes[i] >= 0x80) { multi = true; break; }
+    if (multi) {
+      let nx = stop;
+      while (nx < n && bytes[nx] !== 0x3c) nx++;
+      let tail = nx;
+      while (tail > stop && (bytes[tail - 1] === 0x20 || bytes[tail - 1] === 0x09 || bytes[tail - 1] === 0x0d || bytes[tail - 1] === 0x0a)) tail--;
+      if (tail > stop) stop = tail;
+    }
+    const value = dec.decode(bytes.subarray(pos, stop));
+    pos = stop;
     if (inHeader || !name) continue;
     cur.set(name, value);
   }
   return records;
 }
 
-// ファイルを開いた時点の自動変換（仕様 4）
-function autoConvert(rec) {
+// ファイルを開いた時点の変換（仕様 4。OPERATOR・QSO_DATE_OFF は開くときの選択による。仕様 11）
+function autoConvert(rec, opts) {
   const out = new Map();
   for (const [k, v] of rec) {
-    if (k === 'QSO_DATE_OFF') continue;
-    if (k === 'OPERATOR') {
+    if (k === 'QSO_DATE_OFF' && opts.dropDateOff) continue;
+    if (k === 'OPERATOR' && opts.convertOp) {
       if (!rec.has('STATION_CALLSIGN')) out.set('STATION_CALLSIGN', v);
       continue;
     }
@@ -259,8 +333,10 @@ function pad2(x) { return String(x).padStart(2, '0'); }
 function recordLine(rec) {
   const items = [];
   const put = (k) => { const v = rec.get(k); if (v !== undefined && v !== '') items.push('<' + k + ':' + byteLen(v) + '>' + v); };
-  for (const k of ORDER) put(k);
-  for (const k of rec.keys()) if (!ORDER.includes(k)) put(k);
+  if (!state.sortFields) { for (const k of rec.keys()) put(k); return items.join(' ') + ' <EOR>'; } // 整列しない: 元の順（足した項目は後ろ）
+  const order = withStation(ORDER);
+  for (const k of order) put(k);
+  for (const k of rec.keys()) if (!order.includes(k)) put(k);
   return items.join(' ') + ' <EOR>';
 }
 
@@ -291,8 +367,26 @@ function makeFileName(date, sota, park, jcc, isSub) {
   return (isSub ? 'sub' : '') + (parts.join('-') || 'output') + '.adi';
 }
 
+// 元のファイル名（拡張子なし）。ファイルが無いときは output
+function baseName() { return safeName((state.fileName || 'output').replace(/\.[^.]*$/, '')) || 'output'; }
+// ファイル名（仕様 5.3・11）。決まりの形か、元のファイル名に _edit（分けるときは日付・sub の公園）を付ける
+function outName(date, sota, park, jcc, isSub, split) {
+  if ($('nameMode').value === 'rule') return makeFileName(date, sota, park, jcc, isSub);
+  let n = baseName() + '_edit';
+  if (split && date) n += '-' + date;
+  if (isSub && park) n += '-' + safeName(park);
+  return (isSub ? 'sub' : '') + n + '.adi';
+}
+
 function planOutputs() {
   const c = readCommon();
+  // 分けないとき: 全QSOを1つのファイルに（公園2・3の sub ファイルは作らない）
+  if (!$('splitChk').checked) {
+    if (!state.records.length) return [];
+    const r0 = state.records[0];
+    const g = (k) => (r0.get(k) || '').trim();
+    return [{ name: outName(g('QSO_DATE'), g('MY_SOTA_REF'), g('MY_SIG_INFO'), c.jcc, false, false), records: state.records }];
+  }
   const subParks = c.parks.slice(1);
   // UTC 日付ごとに分ける（元の順を保つ）
   const groups = new Map();
@@ -305,7 +399,7 @@ function planOutputs() {
   for (const [date, recs] of groups) {
     const sota = (recs[0].get('MY_SOTA_REF') || '').trim();
     const park1 = (recs[0].get('MY_SIG_INFO') || '').trim();
-    outs.push({ name: makeFileName(date, sota, park1, c.jcc, false), records: recs });
+    outs.push({ name: outName(date, sota, park1, c.jcc, false, true), records: recs });
     for (const p of subParks) {
       const subRecs = recs.map(r => {
         const m = new Map(r);
@@ -313,7 +407,7 @@ function planOutputs() {
         m.set('MY_SIG_INFO', p);
         return m;
       });
-      outs.push({ name: makeFileName(date, sota, p, c.jcc, true), records: subRecs });
+      outs.push({ name: outName(date, sota, p, c.jcc, true, true), records: subRecs });
     }
   }
   return outs;
@@ -332,15 +426,19 @@ function readCommon() {
   };
 }
 
+// ひな形から QSL MSG を作る（仕様 3.1.1・11）。空の記号は消し、空白を詰める
 function buildQslMsg() {
   const c = readCommon();
-  let s = 'TNX QSO';
-  if (c.sota) s += ' SOTA ' + c.sota;
-  if (c.parks.length) s += (c.sig ? ' ' + c.sig : '') + ' ' + c.parks.join(' ');
-  // JCC/JCG 欄が番号だけ（例: 1001）のときは「JCC/JCG」を前に付ける。
-  // JCC1001 のように先頭が JCC/JCG なら、そのまま。
-  if (c.jcc) s += ' ' + (/^JC[CG]/i.test(c.jcc) ? c.jcc : 'JCC/JCG ' + c.jcc);
-  return s;
+  const val = {
+    SOTA: c.sota ? 'SOTA ' + c.sota : '',
+    POTA: c.parks.length ? (c.sig ? c.sig + ' ' : '') + c.parks.join(' ') : '',
+    // JCC/JCG 欄が番号だけ（例: 1001）のときは「JCC/JCG」を前に付ける。JCC1001 のように先頭が JCC/JCG なら、そのまま。
+    JCC: c.jcc ? (/^JC[CG]/i.test(c.jcc) ? c.jcc : 'JCC/JCG ' + c.jcc) : '',
+    MYCALL: c.station,
+    GRID: c.grid,
+  };
+  const tpl = $('qslTpl').value.trim() || DEFAULT_QSL_TPL;
+  return tpl.replace(/\{(SOTA|POTA|JCC|MYCALL|GRID)\}/gi, (m, k) => val[k.toUpperCase()]).replace(/\s+/g, ' ').trim();
 }
 
 function refreshAuto(changedId) {
@@ -350,8 +448,7 @@ function refreshAuto(changedId) {
     if (any && !sig.value.trim()) sig.value = 'POTA';
     if (!any) sig.value = '';
   }
-  if (!state.qslManual) $('c_qsl').value = buildQslMsg();
-  $('autoBtn').disabled = !state.qslManual;
+  if ($('qslAuto').checked) $('c_qsl').value = buildQslMsg();
 }
 
 function setPending(v) {
@@ -363,7 +460,7 @@ function setPending(v) {
 function applyCommon() {
   const c = readCommon();
   const map = {
-    STATION_CALLSIGN: c.station, MY_GRIDSQUARE: c.grid, MY_SOTA_REF: c.sota,
+    [state.stationKey]: c.station, MY_GRIDSQUARE: c.grid, MY_SOTA_REF: c.sota,
     MY_SIG: c.sig, MY_SIG_INFO: c.parks[0] || '', QSLMSG: c.qsl,
   };
   for (const rec of state.records) {
@@ -385,7 +482,8 @@ const COMMON_LABELS = [
 async function confirmApply() {
   const c = readCommon();
   const vals = { c_station: c.station, c_grid: c.grid, c_sota: c.sota, c_sig: c.sig, c_qsl: c.qsl };
-  const lines = COMMON_LABELS.map(([label, id]) => {
+  const lines = COMMON_LABELS.map(([label0, id]) => {
+    const label = label0 === 'STATION_CALLSIGN' ? state.stationKey : label0;
     const v = id ? vals[id] : (c.parks[0] || '');
     return label + '： ' + (v ? v : '（空白 → このフィールドを消します）');
   });
@@ -395,7 +493,7 @@ async function confirmApply() {
 }
 
 // ===================== 表 =====================
-function columns() { return TABLE_ORDER.concat(state.extraCols); }
+function columns() { return withStation(TABLE_ORDER).concat(state.extraCols); }
 
 function renderTable() {
   const wrap = $('tableWrap');
@@ -694,7 +792,7 @@ function showInputDialog(title, note) {
     ok.addEventListener('click', () => finish(inp.value));
     inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); finish(inp.value); } });
     bb.append(cancel, ok);
-    dlg.onclose = () => finish(null); // Esc キーで閉じたとき
+    dlg.onclose = () => { if (!dlg.open) finish(null); }; // Esc キーで閉じたとき（前の画面の遅れた知らせは、開いている間は無視）
     dlg.showModal();
     inp.focus();
   });
@@ -734,7 +832,7 @@ function addRow() {
   const rec = new Map();
   const last = state.records[state.records.length - 1];
   const put = (k, v) => { if (v) rec.set(k, v); };
-  put('STATION_CALLSIGN', c.station);
+  put(state.stationKey, c.station);
   put('MY_GRIDSQUARE', c.grid);
   put('MY_SOTA_REF', c.sota);
   put('MY_SIG', c.sig);
@@ -768,23 +866,31 @@ function updateFooter() {
 }
 
 // ===================== 開く =====================
-async function openFile(file) {
+async function openFile(file, opts = loadOpenOpts()) {
   if (state.dirty) {
     const ans = await showDialog('保存していない変更があります', ['別のファイルを開くと、今の変更は消えます。開きますか？'],
       [['cancel', 'やめる'], ['ok', '開く', true]]);
     if (ans !== 'ok') return;
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const raw = parseAdif(bytes);
+  const enc = opts.enc === 'utf-8' || opts.enc === 'shift_jis' ? opts.enc : detectEncoding(bytes);
+  state.encoding = enc;
+  const raw = parseAdif(bytes, enc);
   // 先頭の QSO の MY_SIG_INFO（カンマでつながっていれば全部の公園）。自動変換で1つ目にそろえる前に取っておく
   state.fileParks = raw.length ? (raw[0].get('MY_SIG_INFO') || '').split(',').map(s => s.trim()).filter(Boolean) : [];
-  state.records = raw.map(autoConvert);
+  state.records = raw.map(r => autoConvert(r, opts));
+  state.sortFields = opts.sort;
+  // 「Station Callsign or Operator」欄の行き先: 切り替えないときは、ファイルに STATION_CALLSIGN が無く OPERATOR があれば OPERATOR（仕様 11）
+  const has = (k) => state.records.some(r => r.has(k));
+  state.stationKey = (!opts.convertOp && !has('STATION_CALLSIGN') && has('OPERATOR')) ? 'OPERATOR' : 'STATION_CALLSIGN';
   state.fileName = file.name;
-  // ORDER 以外の列（出てきた順）
+  // 表の決まった列以外（出てきた順）
+  const fixed = withStation(TABLE_ORDER);
   const extra = [];
-  for (const r of state.records) for (const k of r.keys()) if (!ORDER.includes(k) && !extra.includes(k)) extra.push(k);
+  for (const r of state.records) for (const k of r.keys()) if (!fixed.includes(k) && !extra.includes(k)) extra.push(k);
   state.extraCols = extra;
-  $('fileName').textContent = file.name + '（' + state.records.length + '件）';
+  $('fileName').textContent = file.name + '（' + state.records.length + '件）' +
+    (enc === 'shift_jis' ? ' ※Shift_JIS として読みました。保存は UTF-8 で書きます' : '');
   fillCommonFromRecords();
   state.dirty = false;
   renderTable();
@@ -796,7 +902,7 @@ function fillCommonFromRecords() {
   const firstVal = (k) => (recs.length ? (recs[0].get(k) || '') : '');
   const differs = (k) => recs.some(r => (r.get(k) || '') !== firstVal(k));
   const set = (id, v) => { $(id).value = v; };
-  set('c_station', firstVal('STATION_CALLSIGN'));
+  set('c_station', firstVal(state.stationKey));
   set('c_grid', firstVal('MY_GRIDSQUARE'));
   set('c_sota', firstVal('MY_SOTA_REF'));
   set('c_sig', firstVal('MY_SIG'));
@@ -806,12 +912,15 @@ function fillCommonFromRecords() {
   set('c_jcc', jcc);
   $('jccHint').textContent = jcc ? '（ファイル名から読み取り）' : '';
   for (const el of document.querySelectorAll('[data-note]')) {
-    el.textContent = differs(el.dataset.note) ? 'QSOごとに値が異なります' : '';
+    const key = el.dataset.note === 'STATION_CALLSIGN' ? state.stationKey : el.dataset.note;
+    el.textContent = differs(key) ? 'QSOごとに値が異なります' : '';
   }
-  const qsl = firstVal('QSLMSG');
-  state.qslManual = !!qsl;
-  if (qsl) set('c_qsl', qsl);
   if (!$('c_sig').value && parks.length) $('c_sig').value = 'POTA';
+  // QSL MSG: ファイルの QSLMSG を入れる。「自動で作る」は覚えている値。ファイルの文が自動の文と違えば、そのファイルのあいだだけチェックを外す（文を消さないため）
+  const qsl = firstVal('QSLMSG');
+  set('c_qsl', qsl);
+  $('qslAuto').checked = loadQslAuto();
+  if ($('qslAuto').checked && qsl && qsl !== buildQslMsg()) $('qslAuto').checked = false;
   refreshAuto('');
   // 表の中身と共通項目が食い違っていれば「未反映」
   setPending(commonDiffersFromTable());
@@ -819,7 +928,7 @@ function fillCommonFromRecords() {
 
 function commonDiffersFromTable() {
   const c = readCommon();
-  const want = { STATION_CALLSIGN: c.station, MY_GRIDSQUARE: c.grid, MY_SOTA_REF: c.sota,
+  const want = { [state.stationKey]: c.station, MY_GRIDSQUARE: c.grid, MY_SOTA_REF: c.sota,
     MY_SIG: c.sig, MY_SIG_INFO: c.parks[0] || '', QSLMSG: c.qsl };
   return state.records.some(r => Object.entries(want).some(([k, v]) => (r.get(k) || '') !== v));
 }
@@ -848,16 +957,10 @@ async function save() {
       return;
     }
   }
-  // 確認（作るファイル名と件数）
-  const lines = [];
-  for (const o of outs) {
-    let exists = false;
-    if (dir) { try { await dir.getFileHandle(o.name); exists = true; } catch (_) { /* なし */ } }
-    lines.push(o.name + '（' + o.records.length + '件）' + (exists ? ' ※同じ名前のファイルがあるので上書きします' : ''));
-  }
-  const where = dir ? '保存先フォルダ: ' + dir.name : 'ダウンロードフォルダに1ファイルずつ保存します';
-  const ok = await showDialog(outs.length + '個のファイルを保存します', [where, ...lines], [['cancel', 'やめる'], ['ok', '保存する', true]]);
-  if (ok !== 'ok') return;
+  // 確認（作るファイル名と件数。名前はここで直せる）
+  const names = await askFileNames(outs, dir);
+  if (!names) return;
+  outs.forEach((o, i) => { o.name = names[i]; });
 
   try {
     for (const o of outs) {
@@ -886,6 +989,81 @@ async function save() {
   await showDialog('保存しました', outs.map(o => o.name), [['ok', 'OK', true]]);
 }
 
+// 保存の前の確認。ファイル名を1つずつ直せる。直した名前の配列を返す（やめたら null）
+function fixName(n) {
+  n = n.trim().replace(/[\\/:*?"<>|]/g, '-');
+  if (n && !/\.(adi|adif)$/i.test(n)) n += '.adi';
+  return n;
+}
+function askFileNames(outs, dir) {
+  return new Promise((resolve) => {
+    const dlg = $('dlg');
+    $('dlgTitle').textContent = outs.length + '個のファイルを保存します';
+    const body = $('dlgBody');
+    body.textContent = '';
+    const where = document.createElement('p');
+    where.textContent = (dir ? '保存先フォルダ: ' + dir.name : 'ダウンロードフォルダに1ファイルずつ保存します') + '。ファイル名は、ここで直せます。';
+    body.appendChild(where);
+    const grid = document.createElement('div');
+    grid.className = 'names';
+    const inputs = [];
+    const checkOne = async (inp, note, count) => {
+      const n = fixName(inp.value);
+      let exists = false;
+      if (dir && n) { try { await dir.getFileHandle(n); exists = true; } catch (_) { /* なし */ } }
+      note.textContent = count + '件' + (exists ? ' ※同じ名前のファイルがあるので上書きします' : '');
+      note.className = exists ? 'note' : 'hint';
+    };
+    outs.forEach((o, i) => {
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.value = o.name;
+      inp.id = 'fname_' + i;
+      inp.spellcheck = false;
+      const note = document.createElement('span');
+      grid.append(inp, note);
+      inputs.push(inp);
+      checkOne(inp, note, o.records.length);
+      inp.addEventListener('input', () => checkOne(inp, note, o.records.length));
+    });
+    body.appendChild(grid);
+    const err = document.createElement('p');
+    err.className = 'err';
+    err.id = 'fnameErr';
+    body.appendChild(err);
+    const bb = $('dlgBtns');
+    bb.textContent = '';
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; dlg.onclose = null; if (dlg.open) dlg.close(); resolve(v); };
+    const cancel = document.createElement('button');
+    cancel.textContent = 'やめる';
+    cancel.addEventListener('click', () => finish(null));
+    const go = document.createElement('button');
+    go.className = 'primary';
+    go.id = 'fnameGo';
+    go.textContent = '保存する';
+    go.addEventListener('click', async () => {
+      const names = inputs.map(inp => fixName(inp.value));
+      if (names.some(n => !n)) { err.textContent = 'ファイル名が空のものがあります。'; return; }
+      const lower = names.map(n => n.toLowerCase());
+      if (new Set(lower).size !== lower.length) { err.textContent = '同じファイル名が2つ以上あります。別の名前にしてください。'; return; }
+      // 元のファイルと同じ名前のファイルが保存先にあれば保存しない（元のファイルを上書きしないため。仕様 11）
+      const orig = (state.fileName || '').toLowerCase();
+      const i = orig ? lower.indexOf(orig) : -1;
+      if (i >= 0 && dir) {
+        let exists = false;
+        try { await dir.getFileHandle(names[i]); exists = true; } catch (_) { /* なし */ }
+        if (exists) { err.textContent = '「' + names[i] + '」は開いた元のファイルと同じ名前で、保存先にあります。元のファイルを上書きしないよう、別の名前にしてください。'; return; }
+      }
+      finish(names);
+    });
+    bb.append(cancel, go);
+    dlg.onclose = () => { if (!dlg.open) finish(null); }; // Esc キーで閉じたとき
+    dlg.showModal();
+    go.focus();
+  });
+}
+
 // ===================== ダイアログ =====================
 function showDialog(title, lines, buttons) {
   return new Promise((resolve) => {
@@ -910,14 +1088,91 @@ function showDialog(title, lines, buttons) {
       b.addEventListener('click', () => finish(val));
       bb.appendChild(b);
     }
-    dlg.onclose = () => finish('cancel'); // Esc キーで閉じたとき
+    dlg.onclose = () => { if (!dlg.open) finish('cancel'); }; // Esc キーで閉じたとき（前の画面の遅れた知らせは、開いている間は無視）
     dlg.showModal();
     if (focusBtn) focusBtn.focus();
   });
 }
 
+// 開くときの選択の画面（チェックボックス3つ）。file があればドロップしたファイル。選んだ値を返す（やめたら null）
+function askOpenOpts(file) {
+  return new Promise((resolve) => {
+    const dlg = $('dlg');
+    const cur = loadOpenOpts();
+    $('dlgTitle').textContent = file ? 'ADIFを開く: ' + file.name : 'ADIFを開く';
+    const body = $('dlgBody');
+    body.textContent = '';
+    const box = document.createElement('div');
+    box.className = 'opts';
+    const items = [
+      ['convertOp', 'OPERATOR を STATION_CALLSIGN に切り替える'],
+      ['dropDateOff', 'QSO_DATE_OFF を削除する'],
+      ['sort', '項目を整列する（保存するファイルの中の項目を、決まった順に並べる）'],
+    ];
+    const checks = {};
+    for (const [key, text] of items) {
+      const label = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.id = 'opt_' + key;
+      cb.checked = cur[key];
+      checks[key] = cb;
+      const span = document.createElement('span');
+      span.textContent = text;
+      label.append(cb, span);
+      box.appendChild(label);
+    }
+    // 文字コード（仕様 11）
+    const encRow = document.createElement('label');
+    encRow.className = 'encrow';
+    const encText = document.createElement('span');
+    encText.textContent = '文字コード';
+    const encSel = document.createElement('select');
+    encSel.id = 'opt_enc';
+    for (const [v, t] of [['auto', '自動で見分ける（UTF-8 か Shift_JIS）'], ['utf-8', 'UTF-8'], ['shift_jis', 'Shift_JIS（ターボ HAMLOG など）']]) {
+      const op = document.createElement('option');
+      op.value = v; op.textContent = t;
+      encSel.appendChild(op);
+    }
+    encSel.value = cur.enc;
+    encRow.append(encText, encSel);
+    box.appendChild(encRow);
+    body.appendChild(box);
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'チェックと文字コードは、このブラウザーが覚えておきます（次に開くときも同じ）。';
+    body.appendChild(hint);
+    const bb = $('dlgBtns');
+    bb.textContent = '';
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      let o = null;
+      if (ok) { o = { convertOp: checks.convertOp.checked, dropDateOff: checks.dropDateOff.checked, sort: checks.sort.checked, enc: $('opt_enc').value }; saveOpenOpts(o); }
+      dlg.onclose = null;
+      if (dlg.open) dlg.close();
+      resolve(o);
+    };
+    const cancel = document.createElement('button');
+    cancel.textContent = 'やめる';
+    cancel.addEventListener('click', () => finish(false));
+    const go = document.createElement('button');
+    go.className = 'primary';
+    go.id = 'optGo';
+    go.textContent = file ? '開く' : 'ファイルを選ぶ';
+    go.addEventListener('click', () => finish(true));
+    bb.append(cancel, go);
+    dlg.onclose = () => { if (!dlg.open) finish(false); }; // Esc キーで閉じたとき（前の画面の遅れた知らせは、開いている間は無視）
+    dlg.showModal();
+    go.focus();
+  });
+}
+
 // ===================== イベント =====================
-$('openBtn').addEventListener('click', () => $('fileInput').click());
+$('openBtn').addEventListener('click', async () => {
+  if (await askOpenOpts(null)) $('fileInput').click();
+});
 $('fileInput').addEventListener('change', (e) => {
   const f = e.target.files[0];
   if (f) openFile(f);
@@ -931,16 +1186,36 @@ for (const id of COMMON_IDS) {
       el.value = el.value.toUpperCase();
       el.setSelectionRange(p, p);
     }
-    if (id === 'c_qsl') { state.qslManual = true; $('autoBtn').disabled = false; }
+    if (id === 'c_qsl') $('qslAuto').checked = false; // 手で書き換えたら自動で外れる（覚えている値は変えない）
     else refreshAuto(id);
     setPending(true);
   });
 }
-$('autoBtn').addEventListener('click', () => {
-  state.qslManual = false;
-  refreshAuto('');
-  setPending(true);
+$('qslAuto').addEventListener('change', async () => {
+  const cb = $('qslAuto');
+  if (!cb.checked) { saveQslAuto(false); return; } // 外したとき: 文はそのまま残す
+  const now = $('c_qsl').value.trim();
+  const auto = buildQslMsg();
+  if (now && now !== auto) {
+    const ans = await showDialog('QSL MSG を自動の文で上書きしますか？', ['今の文： ' + now, '自動の文： ' + auto],
+      [['cancel', 'やめる'], ['ok', '上書きする', true]]);
+    if (ans !== 'ok') { cb.checked = false; return; }
+  }
+  saveQslAuto(true);
+  if ($('c_qsl').value !== auto) { $('c_qsl').value = auto; setPending(true); }
 });
+// ひな形を変えたら覚え、「自動で作る」中なら作り直す
+function onTplChanged() {
+  lsSet(QSL_TPL_KEY, $('qslTpl').value);
+  if ($('qslAuto').checked) {
+    const v = buildQslMsg();
+    if ($('c_qsl').value !== v) { $('c_qsl').value = v; setPending(true); }
+  }
+}
+$('qslTpl').addEventListener('input', onTplChanged);
+$('tplReset').addEventListener('click', () => { $('qslTpl').value = DEFAULT_QSL_TPL; onTplChanged(); });
+$('splitChk').addEventListener('change', () => { lsSet(SPLIT_KEY, $('splitChk').checked ? '1' : '0'); updateFooter(); });
+$('nameMode').addEventListener('change', () => { lsSet(NAME_MODE_KEY, $('nameMode').value); updateFooter(); });
 $('applyBtn').addEventListener('click', async () => { if (await confirmApply()) applyCommon(); });
 $('addRowBtn').addEventListener('click', addRow);
 $('tableWrap').addEventListener('mousedown', onTableMouseDown);
@@ -960,12 +1235,49 @@ window.addEventListener('drop', (e) => {
   dragDepth = 0;
   document.body.classList.remove('dragging');
   const f = e.dataTransfer && e.dataTransfer.files[0];
-  if (f) openFile(f);
+  if (f) askOpenOpts(f).then(o => { if (o) openFile(f, o); });
 });
 window.addEventListener('beforeunload', (e) => { if (state.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
-// 開いた直後は QSL MSG 欄を空にしておき、入力例（薄い文字）を見せる
-$('autoBtn').disabled = true;
+// 開いた直後は QSL MSG 欄を空にしておき、入力例（薄い文字）を見せる。「自動で作る」は覚えている値
+$('qslAuto').checked = loadQslAuto();
+// 表の高さ: 下のつまみをドラッグして変える。ブラウザーが覚える。ダブルクリックで元に戻す（仕様 11）
+const TABLE_H_KEY = 'adifBulkEditor.tableHeight';
+const TABLE_MIN_H = 160;
+function setTableHeight(h) {
+  const wrap = $('tableWrap');
+  if (h) { wrap.style.height = Math.max(TABLE_MIN_H, Math.round(h)) + 'px'; wrap.style.maxHeight = 'none'; }
+  else { wrap.style.height = ''; wrap.style.maxHeight = ''; }
+}
+{
+  const grip = $('tableGrip');
+  let startY = 0, startH = 0, dragging = false;
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    dragging = true;
+    startY = e.clientY;
+    startH = $('tableWrap').getBoundingClientRect().height;
+    grip.classList.add('on');
+    try { grip.setPointerCapture(e.pointerId); } catch (_) { /* つかめなくても動く */ }
+  });
+  grip.addEventListener('pointermove', (e) => { if (dragging) setTableHeight(startH + e.clientY - startY); });
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    grip.classList.remove('on');
+    const h = parseInt($('tableWrap').style.height, 10);
+    if (h) lsSet(TABLE_H_KEY, String(h));
+  };
+  grip.addEventListener('pointerup', end);
+  grip.addEventListener('pointercancel', end);
+  grip.addEventListener('dblclick', () => { setTableHeight(0); try { localStorage.removeItem(TABLE_H_KEY); } catch (_) { /* なし */ } });
+  const saved = parseInt(lsGet(TABLE_H_KEY), 10);
+  if (saved > 0) setTableHeight(saved);
+}
+// 覚えている値（初期値: 分けない・元のファイル名・いつものひな形）
+$('splitChk').checked = lsGet(SPLIT_KEY) === '1';
+$('nameMode').value = lsGet(NAME_MODE_KEY) === 'rule' ? 'rule' : 'orig';
+{ const t = lsGet(QSL_TPL_KEY); $('qslTpl').value = t === null ? DEFAULT_QSL_TPL : t; }
 </script>
 </body>
 </html>

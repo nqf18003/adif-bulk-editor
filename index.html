@@ -54,6 +54,7 @@
   dialog .names { display: grid; grid-template-columns: 1fr max-content; gap: 6px 8px; align-items: center; margin: 8px 0; }
   dialog .names input { min-width: min(460px, 60vw); }
   dialog .err { color: var(--danger); font-size: 13px; margin: 6px 0 0; }
+  dialog .warn { color: var(--warn); font-size: 13px; margin: 6px 0 0; line-height: 1.5; }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; align-items: center; }
   /* テスト中のお知らせ（仕様 11） */
   #testing { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn); border-radius: 6px; padding: 6px 12px; margin: 10px 16px 0; font-size: 13px; }
@@ -224,6 +225,7 @@ const state = {
   dirty: false,     // 保存していない変更があるか
   stationKey: 'STATION_CALLSIGN', // 「Station Callsign or Operator」欄を入れるフィールド（OPERATOR のことがある）
   sortFields: false, // 保存するときに項目を整列するか（開いたときの選択）
+  cellEdits: new Map(), // 表のセルで直した、共通項目と同じ列（QSO の Map -> 列名の Set）。反映すると上書きされるので知らせる（仕様 11）
 };
 
 // ===================== 開くときの選択（仕様 11。このブラウザーが覚える） =====================
@@ -391,6 +393,16 @@ function makeFileName(date, sota, park, jcc, isSub) {
   return (isSub ? 'sub' : '') + (parts.join('-') || 'output') + '.adi';
 }
 
+// 1つのファイルに、公園（MY_SIG_INFO）・山（MY_SOTA_REF）が2つ以上あれば、その説明を返す（仕様 11。分けずに知らせるだけ）
+function mixedPlaces(recs) {
+  const out = [];
+  for (const [key, label] of [['MY_SIG_INFO', '公園'], ['MY_SOTA_REF', '山']]) {
+    const vals = [...new Set(recs.map(r => (r.get(key) || '').trim()))];
+    if (vals.length > 1) out.push(label + '（' + vals.map(v => v || '空').join('・') + '）');
+  }
+  return out;
+}
+
 // 出力するファイル（仕様 5・11）。いつも UTC 日付ごと・公園ごとに分け、名前は決まりの形（2026-11-18 ユーザーの希望）
 function planOutputs() {
   const c = readCommon();
@@ -406,7 +418,7 @@ function planOutputs() {
   for (const [date, recs] of groups) {
     const sota = (recs[0].get('MY_SOTA_REF') || '').trim();
     const park1 = (recs[0].get('MY_SIG_INFO') || '').trim();
-    outs.push({ name: makeFileName(date, sota, park1, c.jcc, false), records: recs });
+    outs.push({ name: makeFileName(date, sota, park1, c.jcc, false), records: recs, mixed: mixedPlaces(recs) });
     for (const p of subParks) {
       const subRecs = recs.map(r => {
         const m = new Map(r);
@@ -477,6 +489,7 @@ function applyCommon() {
   }
   for (const el of document.querySelectorAll('[data-note]')) el.textContent = '';
   setPending(false);
+  state.cellEdits = new Map();
   state.dirty = true;
   renderTable();
 }
@@ -494,6 +507,8 @@ async function confirmApply() {
     const v = id ? vals[id] : (c.parks[0] || '');
     return label + '： ' + (v ? v : '（空白 → このフィールドを消します）');
   });
+  const nOver = cellEditsToOverwrite();
+  if (nOver) lines.unshift(overwriteWarning(nOver).replace('「反映せずに保存」を選んでください', '「やめる」を押してください'));
   const ans = await showDialog(state.records.length + '件のQSOすべてに上書きします。よろしいですか？', lines,
     [['cancel', 'やめる'], ['ok', 'OK', true]]);
   return ans === 'ok';
@@ -585,6 +600,10 @@ function setCellValue(r, c, v, updateInput) {
   if (!rec || !col) return;
   if (v === '') rec.delete(col); else rec.set(col, v);
   state.dirty = true;
+  if (col in commonWant()) {
+    if (!state.cellEdits.has(rec)) state.cellEdits.set(rec, new Set());
+    state.cellEdits.get(rec).add(col);
+  }
   if (updateInput) {
     const inp = cellInput(r, c);
     if (inp) inp.value = v;
@@ -908,6 +927,7 @@ async function openFile(file, opts = loadOpenOpts()) {
     (enc === 'shift_jis' ? ' ※Shift_JIS として読みました。保存は UTF-8 で書きます' : '');
   fillCommonFromRecords();
   state.dirty = false;
+  state.cellEdits = new Map();
   renderTable();
 }
 
@@ -941,20 +961,44 @@ function fillCommonFromRecords() {
   setPending(commonDiffersFromTable());
 }
 
-function commonDiffersFromTable() {
+// 「反映」したときに全QSOに入る値（列名 -> 値）
+function commonWant() {
   const c = readCommon();
-  const want = { [state.stationKey]: c.station, MY_GRIDSQUARE: c.grid, MY_SOTA_REF: c.sota,
+  return { [state.stationKey]: c.station, MY_GRIDSQUARE: c.grid, MY_SOTA_REF: c.sota,
     MY_SIG: c.sig, MY_SIG_INFO: c.parks[0] || '', QSLMSG: c.qsl };
+}
+
+function commonDiffersFromTable() {
+  const want = commonWant();
   return state.records.some(r => Object.entries(want).some(([k, v]) => (r.get(k) || '') !== v));
+}
+
+// 表のセルで直した共通項目の列のうち、反映すると別の値に変わるセルの数（仕様 11）
+function cellEditsToOverwrite() {
+  const want = commonWant();
+  let n = 0;
+  for (const [rec, cols] of state.cellEdits) {
+    if (!state.records.includes(rec)) continue;
+    for (const col of cols) if (col in want && (rec.get(col) || '') !== want[col]) n++;
+  }
+  return n;
+}
+function overwriteWarning(n) {
+  return '⚠ 表で直したセルのうち ' + n + '個が、共通項目の値で上書きされます。表で直した値を残すときは「反映せずに保存」を選んでください。';
 }
 
 // ===================== 保存 =====================
 async function save() {
   if (state.pending) {
-    const ans = await showDialog('共通項目が、まだ表に反映されていません', [
+    // 表で直したセルが上書きされるときは、はっきり知らせ、目立つボタンを「反映せずに保存」にする（仕様 11）
+    const nOver = cellEditsToOverwrite();
+    const lines = [
       '「反映して保存」：共通項目を全QSOに入れてから保存します（空白の項目はそのフィールドを消します）。',
       '「反映せずに保存」：今の表の内容のまま保存します。',
-    ], [['cancel', 'やめる'], ['raw', '反映せずに保存'], ['apply', '反映して保存', true]]);
+    ];
+    if (nOver) lines.unshift(overwriteWarning(nOver));
+    const ans = await showDialog('共通項目が、まだ表に反映されていません', lines,
+      [['cancel', 'やめる'], ['raw', '反映せずに保存', nOver > 0], ['apply', '反映して保存', nOver === 0]]);
     if (ans === 'cancel' || !ans) return;
     if (ans === 'apply') applyCommon();
   }
@@ -1022,6 +1066,14 @@ function askFileNames(outs) {
       inputs.push(inp);
     });
     body.appendChild(grid);
+    for (const o of outs) {
+      if (!o.mixed || !o.mixed.length) continue;
+      const wp = document.createElement('p');
+      wp.className = 'warn';
+      wp.textContent = '⚠ ' + o.name + ' に、' + o.mixed.join('・') + 'が2つ以上入っています。'
+        + 'このツールは日付ごとにしか分けません。場所ごとに分けるときは、場所ごとのログを別々に開いて保存してください。';
+      body.appendChild(wp);
+    }
     const err = document.createElement('p');
     err.className = 'err';
     err.id = 'fnameErr';
